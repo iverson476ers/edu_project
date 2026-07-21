@@ -32,7 +32,6 @@ def load_scorer(checkpoint_path: str, device: str = "cuda"):
         trust_remote_code=True,
         output_hidden_states=True,
     )
-    from peft import PeftModel
     # Note: backbone loaded as base; LoRA weights are in the saved state_dict
     hidden_dim = backbone.config.hidden_size
     model = OrdinalScorer(backbone, hidden_dim, len(score_points))
