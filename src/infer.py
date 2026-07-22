@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import torch
 from transformers import AutoTokenizer
 
@@ -16,8 +18,9 @@ def load_scorer(checkpoint_path: str, device: str = "cuda"):
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # Rebuild model structure and load weights
+    # Rebuild model structure: backbone + LoRA + CoralHead, then load weights
     from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+    from peft import LoraConfig, get_peft_model, TaskType
 
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
@@ -32,7 +35,18 @@ def load_scorer(checkpoint_path: str, device: str = "cuda"):
         trust_remote_code=True,
         output_hidden_states=True,
     )
-    # Note: backbone loaded as base; LoRA weights are in the saved state_dict
+
+    lora_config = LoraConfig(
+        r=config.lora_r,
+        lora_alpha=config.lora_alpha,
+        lora_dropout=config.lora_dropout,
+        bias="none",
+        task_type=TaskType.CAUSAL_LM,
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+    )
+    backbone = get_peft_model(backbone, lora_config)
+    backbone.config.use_cache = False
+
     hidden_dim = backbone.config.hidden_size
     model = OrdinalScorer(backbone, hidden_dim, len(score_points))
     model.load_state_dict(ckpt["model_state_dict"], strict=False)
@@ -43,10 +57,15 @@ def load_scorer(checkpoint_path: str, device: str = "cuda"):
 
 
 def predict(
-    text: str, model: OrdinalScorer, tokenizer, score_points: list[float], device: str = "cuda"
+    text: str,
+    model: OrdinalScorer,
+    tokenizer,
+    score_points: list[float],
+    device: str = "cuda",
+    max_length: int = 2048,
 ) -> float:
     encoded = tokenizer(
-        text, max_length=2048, padding="max_length", truncation=True, return_tensors="pt"
+        text, max_length=max_length, padding="max_length", truncation=True, return_tensors="pt"
     )
     input_ids = encoded["input_ids"].to(device)
     attention_mask = encoded["attention_mask"].to(device)
@@ -58,9 +77,14 @@ def predict(
 
 
 def predict_batch(
-    texts: list[str], model: OrdinalScorer, tokenizer, score_points: list[float], device: str = "cuda"
+    texts: list[str],
+    model: OrdinalScorer,
+    tokenizer,
+    score_points: list[float],
+    device: str = "cuda",
+    max_length: int = 2048,
 ) -> list[float]:
     results = []
     for text in texts:
-        results.append(predict(text, model, tokenizer, score_points, device))
+        results.append(predict(text, model, tokenizer, score_points, device, max_length))
     return results

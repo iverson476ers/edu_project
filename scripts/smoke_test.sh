@@ -7,10 +7,10 @@ echo "[1/5] Config loading..."
 python3 -c "from src.config import load_config; cfg=load_config('configs/q8_config.yaml'); print('OK:', cfg.question_id)"
 
 echo "[2/5] Data pipeline Q8..."
-python3 -c "from src.data_pipeline import build_dataloaders; from src.config import load_config; cfg=load_config('configs/q8_config.yaml'); t, v, sp = build_dataloaders(cfg); print(f'OK: train={len(t)}, test={len(v)}, scores={len(sp)}')"
+python3 -c "from src.data_pipeline import load_and_split_data; from src.config import load_config; cfg=load_config('configs/q8_config.yaml'); t, v, sp = load_and_split_data(cfg); print(f'OK: train={len(t)}, test={len(v)}, scores={len(sp)}')"
 
 echo "[3/5] Data pipeline Q9..."
-python3 -c "from src.data_pipeline import build_dataloaders; from src.config import load_config; cfg=load_config('configs/q9_config.yaml'); t, v, sp = build_dataloaders(cfg); print(f'OK: train={len(t)}, test={len(v)}, scores={len(sp)}')"
+python3 -c "from src.data_pipeline import load_and_split_data; from src.config import load_config; cfg=load_config('configs/q9_config.yaml'); t, v, sp = load_and_split_data(cfg); print(f'OK: train={len(t)}, test={len(v)}, scores={len(sp)}')"
 
 echo "[4/5] Model + loss shapes..."
 python3 -c "

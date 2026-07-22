@@ -3,7 +3,7 @@ from __future__ import annotations
 import glob
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 
 
 def load_answer_data(xlsx_path: str) -> pd.DataFrame:
@@ -87,21 +87,10 @@ class ASAGDataset(Dataset):
         }
 
 
-def collate_fn(batch):
-    """Placeholder collate — real batching needs tokenizer padding handled by DataLoader.
-    In train.py, the DataLoader is set up with the tokenizer's pad_token_id."""
-    return batch
-
-
-def build_dataloaders(
+def load_and_split_data(
     config: "TrainingConfig",
 ) -> tuple:
-    """Load, merge, split data and return DataLoaders + score_points.
-
-    Returns (train_loader, test_loader, score_points).
-    DataLoaders are returned as (train_df, test_df) — actual torch DataLoader
-    construction happens in train.py when tokenizer is available.
-    """
+    """Load, merge, split data and return (train_df, test_df, score_points)."""
     from src.config import TrainingConfig
 
     answer_path = f"{config.data_dir}/answer/answer101_{config.question_id}.xlsx"

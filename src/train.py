@@ -1,3 +1,4 @@
+import json
 import os
 import torch
 from torch.utils.data import DataLoader
@@ -10,7 +11,7 @@ from transformers import (
 from peft import LoraConfig, get_peft_model, TaskType
 
 from src.config import TrainingConfig
-from src.data_pipeline import build_dataloaders, ASAGDataset
+from src.data_pipeline import load_and_split_data, ASAGDataset
 from src.evaluate import compute_metrics
 from src.model import OrdinalScorer, coral_loss, prediction_to_score
 
@@ -87,7 +88,7 @@ def train(config: TrainingConfig):
     torch.manual_seed(config.seed)
 
     # 1. Load data
-    train_df, test_df, score_points = build_dataloaders(config)
+    train_df, test_df, score_points = load_and_split_data(config)
     num_classes = len(score_points)
 
     # 2. Setup model
@@ -165,6 +166,22 @@ def train(config: TrainingConfig):
         print(f"Epoch {epoch+1} avg loss: {epoch_avg_loss:.4f}")
 
     print(f"Training complete. Best accuracy: {best_acc:.4f}")
+
+    # Save final model checkpoint (always)
+    torch.save(
+        {"model_state_dict": model.state_dict(), "config": config, "score_points": score_points},
+        os.path.join(config.output_dir, "final_model.pt"),
+    )
+    print(f"Final model saved to {os.path.join(config.output_dir, 'final_model.pt')}")
+
+    # Run final validation and save metrics
+    final_metrics = validate(model, test_loader, score_points, device)
+    final_metrics["best_accuracy"] = best_acc
+    with open(os.path.join(config.output_dir, "metrics.json"), "w") as f:
+        json.dump(final_metrics, f, indent=2)
+    print(f"Final metrics: {final_metrics}")
+    print(f"Metrics saved to {os.path.join(config.output_dir, 'metrics.json')}")
+
     return model, tokenizer
 
 
