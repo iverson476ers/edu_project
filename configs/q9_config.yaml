@@ -17,3 +17,4 @@ max_grad_norm: 1.0
 logging_steps: 50
 eval_steps: 200
 save_steps: 500
+tolerance: 6.67

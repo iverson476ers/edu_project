@@ -67,7 +67,7 @@ def get_dataloader(df, tokenizer, config, shuffle=True):
     return DataLoader(ds, batch_size=config.batch_size, shuffle=shuffle)
 
 
-def validate(model, dataloader, score_points, device):
+def validate(model, dataloader, score_points, device, tolerance=0.0):
     model.eval()
     all_preds = []
     all_labels = []
@@ -80,7 +80,7 @@ def validate(model, dataloader, score_points, device):
             preds = prediction_to_score(probs.cpu(), score_points)
             all_preds.extend(preds)
             all_labels.extend(batch["label"].tolist())
-    return compute_metrics(all_preds, all_labels)
+    return compute_metrics(all_preds, all_labels, tolerance=tolerance if tolerance > 0 else None)
 
 
 def train(config: TrainingConfig):
@@ -141,7 +141,7 @@ def train(config: TrainingConfig):
                 print(f"Step {global_step}: loss={loss.item():.4f}, lr={scheduler.get_last_lr()[0]:.2e}")
 
             if global_step % config.eval_steps == 0:
-                metrics = validate(model, test_loader, score_points, device)
+                metrics = validate(model, test_loader, score_points, device, config.tolerance)
                 print(f"Eval @ step {global_step}: {metrics}")
                 if metrics["exact_accuracy"] > best_acc:
                     best_acc = metrics["exact_accuracy"]
@@ -153,7 +153,7 @@ def train(config: TrainingConfig):
                 model.train()
 
         # End of epoch eval
-        metrics = validate(model, test_loader, score_points, device)
+        metrics = validate(model, test_loader, score_points, device, config.tolerance)
         print(f"Epoch {epoch+1}/{config.epochs}: {metrics}")
         if metrics["exact_accuracy"] > best_acc:
             best_acc = metrics["exact_accuracy"]

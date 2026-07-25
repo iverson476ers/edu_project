@@ -24,6 +24,7 @@ class TrainingConfig:
     logging_steps: int = 50
     eval_steps: int = 200
     save_steps: int = 500
+    tolerance: float = 0.0
 
 
 def load_config(yaml_path: str) -> TrainingConfig:
