@@ -1,0 +1,6 @@
+data/
+zip_data/
+.superpowers/
+__pycache__/
+*.pyc
+.DS_Store
