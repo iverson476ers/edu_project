@@ -84,6 +84,7 @@ class ASAGDataset(Dataset):
             "attention_mask": attention_mask,
             "label": self.labels[idx],
             "label_idx": self.label_indices[idx],
+            "text": self.texts[idx],
         }
 
 
