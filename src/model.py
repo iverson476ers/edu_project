@@ -8,17 +8,45 @@ import torch.nn.functional as F
 class CoralHead(nn.Module):
     """Ordinal regression head: K classes -> K-1 binary classifiers.
 
-    Each output neuron k predicts P(score > threshold_k).
+    Configurable depth with LayerNorm + GELU + Dropout + Residual connections.
+    Set hidden_sizes=[] for the original single-layer behavior.
     """
 
-    def __init__(self, hidden_dim: int, num_classes: int):
+    def __init__(self, hidden_dim: int, num_classes: int,
+                 hidden_sizes: list[int] | None = None,
+                 dropout: float = 0.1):
         super().__init__()
         self.num_classes = num_classes
-        self.linear = nn.Linear(hidden_dim, num_classes - 1)
+        self.hidden_sizes = hidden_sizes or []
+        self.dropout = dropout
 
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        # hidden_states: (batch, hidden_dim)
-        return self.linear(hidden_states)  # (batch, K-1)
+        layers = []
+        in_dim = hidden_dim
+        for h in self.hidden_sizes:
+            block = nn.Sequential(
+                nn.LayerNorm(in_dim),
+                nn.Linear(in_dim, h),
+                nn.GELU(),
+                nn.Dropout(dropout),
+            )
+            layers.append(block)
+            # Residual projection if dimensions don't match
+            proj = nn.Linear(in_dim, h) if in_dim != h else nn.Identity()
+            layers.append(proj)
+            in_dim = h
+
+        self.blocks = nn.ModuleList(layers) if layers else None
+        self.linear = nn.Linear(in_dim, num_classes - 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (batch, hidden_dim)
+        if self.blocks is not None:
+            for i in range(0, len(self.blocks), 2):
+                block = self.blocks[i]       # Sequential: LayerNorm → Linear → GELU → Dropout
+                proj = self.blocks[i + 1]    # Projection for residual
+                residual = proj(x)
+                x = block(x) + residual
+        return self.linear(x)  # (batch, K-1)
 
 
 class DummyBackbone(nn.Module):
@@ -41,27 +69,39 @@ class DummyBackbone(nn.Module):
 
 
 class OrdinalScorer(nn.Module):
-    """Qwen backbone + CoralHead for ordinal regression scoring."""
+    """Qwen backbone + Pooling + CoralHead for ordinal regression scoring.
 
-    def __init__(self, backbone: nn.Module, hidden_dim: int, num_classes: int):
+    Args:
+        pooling: BasePooling instance (defaults to MeanPooling)
+        head_config: kwargs dict for CoralHead (hidden_sizes, dropout)
+    """
+
+    def __init__(self, backbone: nn.Module, hidden_dim: int, num_classes: int,
+                 pooling: nn.Module | None = None,
+                 head_config: dict | None = None):
         super().__init__()
+        from src.pooling import MeanPooling
         self.backbone = backbone
-        self.head = CoralHead(hidden_dim, num_classes)
+        self.pooling = pooling or MeanPooling()
+        head_kwargs = head_config or {}
+        self.head = CoralHead(hidden_dim, num_classes, **head_kwargs)
         self.num_classes = num_classes
 
-    def forward(self, input_ids, attention_mask=None):
+    def forward(self, input_ids, attention_mask=None,
+                handcrafted_features: torch.Tensor | None = None):
         outputs = self.backbone(
             input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True
         )
-        # Use last hidden state of last token (or mean pool)
         hidden = outputs.hidden_states[-1]  # (batch, seq_len, hidden_dim)
-        # Mean pool over non-padding tokens, or use last token
-        if attention_mask is not None:
-            mask = attention_mask.unsqueeze(-1).float()
-            hidden = (hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1)
-        else:
-            hidden = hidden.mean(dim=1)
-        return self.head(hidden)  # (batch, K-1)
+        if attention_mask is None:
+            attention_mask = torch.ones(hidden.size(0), hidden.size(1), device=hidden.device)
+        pooled = self.pooling(hidden, attention_mask)  # (batch, hidden_dim)
+
+        # Reserved: concat handcrafted features here in the future
+        if handcrafted_features is not None:
+            pooled = torch.cat([pooled, handcrafted_features], dim=-1)
+
+        return self.head(pooled)  # (batch, K-1)
 
 
 def coral_loss(

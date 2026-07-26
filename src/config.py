@@ -1,3 +1,4 @@
+from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 import yaml
@@ -25,6 +26,10 @@ class TrainingConfig:
     eval_steps: int = 200
     save_steps: int = 500
     tolerance: float = 0.0
+    # NEW fields:
+    pooling: str = "mean"                              # "mean" | "last" | "attention"
+    head_hidden_sizes: list[int] = field(default_factory=list)  # e.g. [512, 128], empty=old behavior
+    head_dropout: float = 0.1
 
 
 def load_config(yaml_path: str) -> TrainingConfig:
