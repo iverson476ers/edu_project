@@ -40,6 +40,7 @@ class CoralHead(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: (batch, hidden_dim)
+        x = x.to(self.linear.weight.dtype)  # ensure float32 for all Linear/LayerNorm layers
         if self.blocks is not None:
             for i in range(0, len(self.blocks), 2):
                 block = self.blocks[i]       # Sequential: LayerNorm → Linear → GELU → Dropout
