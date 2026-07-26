@@ -36,7 +36,7 @@ class CoralHead(nn.Module):
             in_dim = h
 
         self.blocks = nn.ModuleList(layers) if layers else None
-        self.output = nn.Linear(in_dim, num_classes - 1)
+        self.linear = nn.Linear(in_dim, num_classes - 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: (batch, hidden_dim)
@@ -46,7 +46,7 @@ class CoralHead(nn.Module):
                 proj = self.blocks[i + 1]    # Projection for residual
                 residual = proj(x)
                 x = block(x) + residual
-        return self.output(x)  # (batch, K-1)
+        return self.linear(x)  # (batch, K-1)
 
 
 class DummyBackbone(nn.Module):
