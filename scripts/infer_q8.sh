@@ -19,4 +19,3 @@ python -m src.infer \
   --batch_size 32
 
 echo "Done."
-

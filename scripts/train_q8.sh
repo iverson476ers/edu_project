@@ -1,5 +1,4 @@
 #!/bin/bash
-
 set -e
 export PYTHONPATH=$PYTHONPATH:.
 cd "$(dirname "$0")/.."

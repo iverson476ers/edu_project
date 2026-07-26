@@ -61,4 +61,3 @@ def compute_metrics(
         metrics[f"tolerance_acc({tolerance})"] = tolerance_accuracy(preds, labels, tolerance)
         metrics[f"tolerance_qwk({tolerance})"] = tolerance_qwk(preds, labels, tolerance)
     return metrics
-
