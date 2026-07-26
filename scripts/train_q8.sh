@@ -1,5 +1,7 @@
 #!/bin/bash
 set -e
-echo "Training Q8 (short-answer scoring)..."
+export PYTHONPATH=$PYTHONPATH:.
+cd "$(dirname "$0")/.."
+echo "Training Q8 (short-answer scoring)... $PWD"
 python src/train.py --config configs/q8_config.yaml
 echo "Q8 training complete."

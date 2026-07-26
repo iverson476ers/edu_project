@@ -75,3 +75,7 @@ output/
     ├── final_model.pt
     └── metrics.json
 ```
+
+## 优化角度
+- config参数，batch_size, seq_max_length
+- config 参数，lora rank参数 8,16
