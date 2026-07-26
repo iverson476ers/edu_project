@@ -42,7 +42,7 @@ class AttentionPooling(BasePooling):
 
     def forward(self, hidden_states: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
         # hidden_states: (B, L, D)
-        scores = torch.matmul(hidden_states, self.query)   # (B, L)
+        scores = torch.matmul(hidden_states, self.query.to(hidden_states.dtype))   # (B, L)
         # Mask padding positions with -inf
         scores = scores.masked_fill(attention_mask == 0, float("-inf"))
         weights = torch.softmax(scores, dim=-1).unsqueeze(-1)  # (B, L, 1)
