@@ -18,3 +18,7 @@ logging_steps: 50
 eval_steps: 200
 save_steps: 500
 tolerance: 6.67
+# Architecture
+pooling: "last"
+head_hidden_sizes: [512, 128]
+head_dropout: 0.1
