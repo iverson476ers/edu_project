@@ -1,6 +1,6 @@
-model_name: "qwen/Qwen2.5-4B-Instruct"
-max_length: 2048
-batch_size: 8
+model_name: "/root/workspace/edu_project/model/base/qwen3-4b"
+max_length: 1024
+batch_size: 16
 lora_r: 16
 lora_alpha: 32
 lora_dropout: 0.05
@@ -8,12 +8,13 @@ learning_rate: 2.0e-4
 epochs: 5
 test_size: 0.2
 seed: 42
-output_dir: "./output/q9"
+output_dir: "/root/workspace/edu_project/model/checkpoint/q9"
 data_dir: "./data/101"
 question_id: "9"
 warmup_ratio: 0.1
 weight_decay: 0.01
 max_grad_norm: 1.0
-logging_steps: 50
-eval_steps: 200
-save_steps: 500
+logging_steps: 10
+eval_steps: 50
+save_steps: 100
+tolerance: 6.0

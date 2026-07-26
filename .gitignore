@@ -1,0 +1,9 @@
+data/
+zip_data/
+.superpowers/
+__pycache__/
+*.pyc
+.DS_Store
+.claude/
+pred_out/
+model/
