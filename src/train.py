@@ -54,7 +54,16 @@ def setup_model_and_tokenizer(
     backbone.config.use_cache = False  # disable KV cache for training
 
     hidden_dim = backbone.config.hidden_size
-    model = OrdinalScorer(backbone, hidden_dim, num_classes)
+    # Old: model = OrdinalScorer(backbone, hidden_dim, num_classes)
+    # New:
+    from src.pooling import build_pooling
+    pooling = build_pooling(config.pooling, hidden_dim)
+    head_config = {
+        "hidden_sizes": config.head_hidden_sizes,
+        "dropout": config.head_dropout,
+    }
+    model = OrdinalScorer(backbone, hidden_dim, num_classes,
+                          pooling=pooling, head_config=head_config)
 
     # Enable gradient checkpointing
     backbone.gradient_checkpointing_enable()
