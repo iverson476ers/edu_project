@@ -1,7 +1,7 @@
 #!/bin/bash
 # Smoke test: verify all modules import and data pipeline works end-to-end locally
 set -e
-PY="conda run -n torch python"
+PY="python3.11"
 echo "=== Smoke Test (No GPU) ==="
 
 echo "[1/5] Config loading..."

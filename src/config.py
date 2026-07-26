@@ -19,6 +19,7 @@ class TrainingConfig:
     output_dir: str = "./output"
     data_dir: str = "./data/101"
     question_id: str = "8"
+    subject_id: str = "101"
     warmup_ratio: float = 0.1
     weight_decay: float = 0.01
     max_grad_norm: float = 1.0
