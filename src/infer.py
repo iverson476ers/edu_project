@@ -48,7 +48,17 @@ def load_scorer(checkpoint_path: str, device: str = "cuda"):
     backbone.config.use_cache = False
 
     hidden_dim = backbone.config.hidden_size
-    model = OrdinalScorer(backbone, hidden_dim, len(score_points))
+    # Old: model = OrdinalScorer(backbone, hidden_dim, len(score_points))
+    # New: detect arch from config, fall back for old checkpoints
+    from src.pooling import build_pooling
+    pooling_strategy = getattr(config, "pooling", "mean")
+    pooling = build_pooling(pooling_strategy, hidden_dim)
+    head_config = {
+        "hidden_sizes": getattr(config, "head_hidden_sizes", []),
+        "dropout": getattr(config, "head_dropout", 0.1),
+    }
+    model = OrdinalScorer(backbone, hidden_dim, len(score_points),
+                          pooling=pooling, head_config=head_config)
     model.load_state_dict(ckpt["model_state_dict"], strict=False)
     model.to(device)
     model.eval()
