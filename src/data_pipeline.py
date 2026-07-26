@@ -93,7 +93,7 @@ def load_and_split_data(
     """Load, merge, split data and return (train_df, test_df, score_points)."""
     from src.config import TrainingConfig
 
-    answer_path = f"{config.data_dir}/answer/answer101_{config.question_id}.xlsx"
+    answer_path = f"{config.data_dir}/answer/answer{config.subject_id}_{config.question_id}.xlsx"
 
     answer_df = load_answer_data(answer_path)
     calib_df = load_calibration_data(config.data_dir, config.question_id)

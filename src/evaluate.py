@@ -31,6 +31,11 @@ def qwk(preds: list[float], labels: list[float]) -> float:
 def tolerance_accuracy(preds: list[float], labels: list[float], tolerance: float) -> float:
     """Accuracy within tolerance: |pred - label| <= tolerance counts as correct."""
     correct = sum(1 for p, l in zip(preds, labels) if abs(p - l) <= tolerance)
+    errors = [abs(p-l) for p, l in zip(preds, labels)]
+    print(f"差≤0.5: {sum(e <= 0.5 for e in errors) / len(errors):.1%}")
+    print(f"差=1.0:  {sum(e == 1.0 for e in errors) / len(errors):.1%}")
+    print(f"差=1.5:  {sum(e == 1.5 for e in errors) / len(errors):.1%}")
+    print(f"差≥2.0: {sum(e >= 2.0 for e in errors) / len(errors):.1%}")
     return correct / len(labels)
 
 

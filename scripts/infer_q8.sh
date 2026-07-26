@@ -11,8 +11,7 @@ echo "  Checkpoint: $CHECKPOINT"
 echo "  Input:      $INPUT"
 echo "  Output:     $OUTPUT"
 
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-
+#export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 python -m src.infer \
   --checkpoint "$CHECKPOINT" \
   --input "$INPUT" \

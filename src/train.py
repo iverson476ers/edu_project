@@ -153,6 +153,7 @@ def train(config: TrainingConfig):
                 model.train()
 
         # End of epoch eval
+        #metrics = validate(model, test_loader, score_points, device)
         metrics = validate(model, test_loader, score_points, device, config.tolerance)
         print(f"Epoch {epoch+1}/{config.epochs}: {metrics}")
         if metrics["exact_accuracy"] > best_acc:
@@ -175,7 +176,8 @@ def train(config: TrainingConfig):
     print(f"Final model saved to {os.path.join(config.output_dir, 'final_model.pt')}")
 
     # Run final validation and save metrics
-    final_metrics = validate(model, test_loader, score_points, device)
+    final_metrics = validate(model, test_loader, score_points, device, config.tolerance)
+    #final_metrics = validate(model, test_loader, score_points, device)
     final_metrics["best_accuracy"] = best_acc
     with open(os.path.join(config.output_dir, "metrics.json"), "w") as f:
         json.dump(final_metrics, f, indent=2)

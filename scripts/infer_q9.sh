@@ -11,12 +11,11 @@ echo "  Checkpoint: $CHECKPOINT"
 echo "  Input:      $INPUT"
 echo "  Output:     $OUTPUT"
 
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-
 python -m src.infer \
   --checkpoint "$CHECKPOINT" \
   --input "$INPUT" \
   --output "$OUTPUT" \
-  --batch_size 32
+  --batch_size 16
 
 echo "Done."
+
