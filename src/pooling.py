@@ -16,7 +16,7 @@ class MeanPooling(BasePooling):
     """Mask-weighted mean over non-padding tokens. Zero extra parameters."""
 
     def forward(self, hidden_states: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
-        mask = attention_mask.unsqueeze(-1).float()        # (B, L, 1)
+        mask = attention_mask.unsqueeze(-1).to(hidden_states.dtype)  # (B, L, 1)
         masked = hidden_states * mask
         summed = masked.sum(dim=1)                         # (B, D)
         counts = mask.sum(dim=1).clamp(min=1)              # (B, 1)
@@ -44,7 +44,7 @@ class AttentionPooling(BasePooling):
         # hidden_states: (B, L, D)
         scores = torch.matmul(hidden_states, self.query.to(hidden_states.dtype))   # (B, L)
         # Mask padding positions with -inf
-        scores = scores.masked_fill(attention_mask == 0, float("-inf"))
+        scores = scores.masked_fill(attention_mask == 0, torch.finfo(hidden_states.dtype).min)
         weights = torch.softmax(scores, dim=-1).unsqueeze(-1)  # (B, L, 1)
         return (hidden_states * weights).sum(dim=1)            # (B, D)
 
