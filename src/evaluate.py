@@ -32,10 +32,16 @@ def tolerance_accuracy(preds: list[float], labels: list[float], tolerance: float
     """Accuracy within tolerance: |pred - label| <= tolerance counts as correct."""
     correct = sum(1 for p, l in zip(preds, labels) if abs(p - l) <= tolerance)
     errors = [abs(p-l) for p, l in zip(preds, labels)]
-    print(f"差≤0.5: {sum(e <= 0.5 for e in errors) / len(errors):.1%}")
-    print(f"差=1.0:  {sum(e == 1.0 for e in errors) / len(errors):.1%}")
-    print(f"差=1.5:  {sum(e == 1.5 for e in errors) / len(errors):.1%}")
-    print(f"差≥2.0: {sum(e >= 2.0 for e in errors) / len(errors):.1%}")
+    n = len(errors)
+    # Cumulative within 0-4 at 0.5 granularity
+    for threshold in [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0,5.0,6.0,7.0]:
+        print(f"差≤{threshold:.1f}: {sum(e <= threshold for e in errors) / n:.1%}")
+    # Tail: proportion exceeding key thresholds
+    
+    
+    for threshold in [7.0, 8.0, 9.0, 10.0]:
+        print(f"差>{threshold:.1f}: {sum(e > threshold for e in errors) / n:.1%}")
+    
     return correct / len(labels)
 
 
