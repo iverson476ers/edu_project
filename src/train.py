@@ -80,16 +80,24 @@ def validate(model, dataloader, score_points, device, tolerance=0.0):
     model.eval()
     all_preds = []
     all_labels = []
+    total_loss = 0.0
+    num_samples = 0
     with torch.no_grad():
         for batch in dataloader:
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
+            label_indices = batch["label_idx"].to(device)
             logits = model(input_ids, attention_mask)
+            loss = coral_loss(logits, label_indices, model.num_classes)
+            total_loss += loss.item() * input_ids.size(0)
+            num_samples += input_ids.size(0)
             probs = torch.sigmoid(logits)
             preds = prediction_to_score(probs.cpu(), score_points)
             all_preds.extend(preds)
             all_labels.extend(batch["label"].tolist())
-    return compute_metrics(all_preds, all_labels, tolerance=tolerance if tolerance > 0 else None)
+    metrics = compute_metrics(all_preds, all_labels, tolerance=tolerance if tolerance > 0 else None)
+    metrics["val_loss"] = total_loss / num_samples
+    return metrics
 
 
 def train(config: TrainingConfig):
@@ -173,7 +181,8 @@ def train(config: TrainingConfig):
             )
 
         epoch_avg_loss = epoch_loss / len(train_loader)
-        print(f"Epoch {epoch+1} avg loss: {epoch_avg_loss:.4f}")
+        val_loss = metrics.get("val_loss", float("nan"))
+        print(f"Epoch {epoch+1} train_loss={epoch_avg_loss:.4f}, val_loss={val_loss:.4f}")
 
     print(f"Training complete. Best accuracy: {best_acc:.4f}")
 
