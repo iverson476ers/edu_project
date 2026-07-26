@@ -1,4 +1,4 @@
-model_name: "/root/workspace/edu_project/model/base/qwen3-4b"
+model_name: "/root/workspace/base_model/qwen3-4b"
 max_length: 512
 batch_size: 32
 lora_r: 16
@@ -8,9 +8,10 @@ learning_rate: 2.0e-4
 epochs: 5
 test_size: 0.2
 seed: 42
-output_dir: "/root/workspace/edu_project/model/checkpoint/q4_103"
-data_dir: "./data/103"
+output_dir: "/root/workspace/sft_model/103_q4"
+data_dir: "/root/workspace/dataset/data/103"
 question_id: "4"
+subject_id: "103"
 warmup_ratio: 0.1
 weight_decay: 0.01
 max_grad_norm: 1.0
