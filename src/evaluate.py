@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import math
+
+from scipy import stats
 from sklearn.metrics import cohen_kappa_score
 
 
@@ -17,6 +20,34 @@ def exact_accuracy(preds: list[float], labels: list[float]) -> float:
 
 def mae(preds: list[float], labels: list[float]) -> float:
     return sum(abs(p - l) for p, l in zip(preds, labels)) / len(labels)
+
+
+def rmse(preds: list[float], labels: list[float]) -> float:
+    return math.sqrt(sum((p - l) ** 2 for p, l in zip(preds, labels)) / len(preds))
+
+
+def kappa(preds: list[float], labels: list[float]) -> float:
+    """Cohen's Kappa (unweighted)."""
+    all_vals = sorted(set(preds) | set(labels))
+    val_to_idx = {v: i for i, v in enumerate(all_vals)}
+    preds_int = [val_to_idx[p] for p in preds]
+    labels_int = [val_to_idx[l] for l in labels]
+    return cohen_kappa_score(labels_int, preds_int)
+
+
+def acc_within(preds: list[float], labels: list[float], threshold: float) -> float:
+    """Accuracy within threshold: |pred - label| <= threshold."""
+    return sum(1 for p, l in zip(preds, labels) if abs(p - l) <= threshold) / len(preds)
+
+
+def pearson(preds: list[float], labels: list[float]) -> float:
+    r, _ = stats.pearsonr(preds, labels)
+    return r
+
+
+def spearman(preds: list[float], labels: list[float]) -> float:
+    rho, _ = stats.spearmanr(preds, labels)
+    return rho
 
 
 def qwk(preds: list[float], labels: list[float]) -> float:
@@ -61,7 +92,12 @@ def compute_metrics(
     metrics = {
         "exact_accuracy": exact_accuracy(preds, labels),
         "mae": mae(preds, labels),
+        "rmse": rmse(preds, labels),
         "qwk": qwk(preds, labels),
+        "kappa": kappa(preds, labels),
+        "pearson": pearson(preds, labels),
+        "spearman": spearman(preds, labels),
+        "acc_0.5": acc_within(preds, labels, 0.5),
     }
     if tolerance is not None:
         metrics[f"tolerance_acc({tolerance})"] = tolerance_accuracy(preds, labels, tolerance)
