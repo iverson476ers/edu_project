@@ -3,14 +3,19 @@ from __future__ import annotations
 import torch
 from transformers import AutoTokenizer
 
-from src.model import OrdinalScorer, prediction_to_score
+from src.model import OrdinalScorer, prediction_to_score, regression_to_score
 
 
 def load_scorer(checkpoint_path: str, device: str = "cuda"):
-    """Load a saved OrdinalScorer checkpoint. Returns (model, tokenizer, score_points, max_length)."""
+    """Load a saved OrdinalScorer checkpoint.
+
+    Returns (model, tokenizer, score_points, max_length, full_score, head_type).
+    """
     ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     config = ckpt["config"]
     score_points = ckpt["score_points"]
+    full_score = ckpt.get("full_score", float(score_points[-1]))
+    head_type = getattr(config, "head_type", "coral")
 
     tokenizer = AutoTokenizer.from_pretrained(
         config.model_name, trust_remote_code=True
@@ -18,7 +23,7 @@ def load_scorer(checkpoint_path: str, device: str = "cuda"):
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # Rebuild model structure: backbone + LoRA + CoralHead, then load weights
+    # Rebuild model structure: backbone + LoRA + Head, then load weights
     from transformers import AutoModelForCausalLM, BitsAndBytesConfig
     from peft import LoraConfig, get_peft_model, TaskType
 
@@ -48,8 +53,6 @@ def load_scorer(checkpoint_path: str, device: str = "cuda"):
     backbone.config.use_cache = False
 
     hidden_dim = backbone.config.hidden_size
-    # Old: model = OrdinalScorer(backbone, hidden_dim, len(score_points))
-    # New: detect arch from config, fall back for old checkpoints
     from src.pooling import build_pooling
     pooling_strategy = getattr(config, "pooling", "mean")
     pooling = build_pooling(pooling_strategy, hidden_dim)
@@ -58,12 +61,13 @@ def load_scorer(checkpoint_path: str, device: str = "cuda"):
         "dropout": getattr(config, "head_dropout", 0.1),
     }
     model = OrdinalScorer(backbone, hidden_dim, len(score_points),
-                          pooling=pooling, head_config=head_config)
+                          pooling=pooling, head_config=head_config,
+                          head_type=head_type)
     model.load_state_dict(ckpt["model_state_dict"], strict=False)
     model.to(device)
     model.eval()
 
-    return model, tokenizer, score_points, config.max_length
+    return model, tokenizer, score_points, config.max_length, full_score, head_type
 
 
 def predict(
@@ -73,6 +77,7 @@ def predict(
     score_points: list[float],
     device: str = "cuda",
     max_length: int = 2048,
+    full_score: float | None = None,
 ) -> float:
     """Predict score for a single text."""
     encoded = tokenizer(
@@ -82,8 +87,11 @@ def predict(
     attention_mask = encoded["attention_mask"].to(device)
     with torch.no_grad():
         logits = model(input_ids, attention_mask)
-        probs = torch.sigmoid(logits)
-        scores = prediction_to_score(probs.cpu(), score_points)
+        if getattr(model, "head_type", "coral") == "regression":
+            scores = regression_to_score(logits.cpu(), full_score)
+        else:
+            probs = torch.sigmoid(logits)
+            scores = prediction_to_score(probs.cpu(), score_points)
     return scores[0]
 
 
@@ -94,6 +102,7 @@ def predict_batch(
     score_points: list[float],
     device: str = "cuda",
     max_length: int = 2048,
+    full_score: float | None = None,
 ) -> list[float]:
     """Predict scores for a batch of texts in one forward pass."""
     encoded = tokenizer(
@@ -107,8 +116,11 @@ def predict_batch(
     attention_mask = encoded["attention_mask"].to(device)
     with torch.no_grad():
         logits = model(input_ids, attention_mask)
-        probs = torch.sigmoid(logits).cpu()
-        scores = prediction_to_score(probs, score_points)
+        if getattr(model, "head_type", "coral") == "regression":
+            scores = regression_to_score(logits.cpu(), full_score)
+        else:
+            probs = torch.sigmoid(logits).cpu()
+            scores = prediction_to_score(probs, score_points)
     return scores
 
 
@@ -137,8 +149,10 @@ if __name__ == "__main__":
 
     # Load model
     print(f"Loading checkpoint: {args.checkpoint}")
-    model, tokenizer, score_points, max_length = load_scorer(args.checkpoint, device=args.device)
-    print(f"Model loaded, score_points={len(score_points)}, max_length={max_length}")
+    model, tokenizer, score_points, max_length, full_score, head_type = load_scorer(
+        args.checkpoint, device=args.device
+    )
+    print(f"Model loaded, head={head_type}, score_points={len(score_points)}, max_length={max_length}")
 
     # Read input
     df = pd.read_excel(args.input)
@@ -168,6 +182,7 @@ if __name__ == "__main__":
             batch_scores = predict_batch(
                 batch_texts, model, tokenizer, score_points,
                 device=args.device, max_length=max_length,
+                full_score=full_score,
             )
             for idx in range(len(batch_texts)):
                 predictions.append((indices[start + idx], batch_scores[idx], "成功"))

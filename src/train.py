@@ -178,7 +178,7 @@ def train(config: TrainingConfig):
                 if metrics["exact_accuracy"] > best_acc:
                     best_acc = metrics["exact_accuracy"]
                     torch.save(
-                        {"model_state_dict": model.state_dict(), "config": config, "score_points": score_points},
+                        {"model_state_dict": model.state_dict(), "config": config, "score_points": score_points, "full_score": full_score},
                         os.path.join(config.output_dir, "best_model.pt"),
                     )
                     print(f"New best model saved! acc={best_acc:.4f}")
@@ -191,7 +191,7 @@ def train(config: TrainingConfig):
         if metrics["exact_accuracy"] > best_acc:
             best_acc = metrics["exact_accuracy"]
             torch.save(
-                {"model_state_dict": model.state_dict(), "config": config, "score_points": score_points},
+                {"model_state_dict": model.state_dict(), "config": config, "score_points": score_points, "full_score": full_score},
                 os.path.join(config.output_dir, "best_model.pt"),
             )
 
@@ -203,7 +203,7 @@ def train(config: TrainingConfig):
 
     # Save final model checkpoint (always)
     torch.save(
-        {"model_state_dict": model.state_dict(), "config": config, "score_points": score_points},
+        {"model_state_dict": model.state_dict(), "config": config, "score_points": score_points, "full_score": full_score},
         os.path.join(config.output_dir, "final_model.pt"),
     )
     print(f"Final model saved to {os.path.join(config.output_dir, 'final_model.pt')}")
