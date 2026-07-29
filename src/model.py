@@ -175,30 +175,27 @@ def coral_loss(
 
 def regression_loss(
     preds: torch.Tensor, labels: torch.Tensor, full_score: float,
-    tolerance: float = 0.0,
+    beta: float = 1.0,
 ) -> torch.Tensor:
-    """Tolerance-aware weighted MSE for regression head.
+    """MSE + margin penalty for regression head.
 
-    gap = |pred - label / full_score|  (both in [0,1])
-    If gap <= tolerance/full_score: weight = 1
-    Else: weight = 1 + (gap - tolerance/full_score)
+    L1_loss = beta * max(|pred - labels_norm| - 0.5/full_score, 0)^2
+    total = MSE + mean(L1_loss)
+
+    The margin (0.5/full_score) means errors within 0.5 score points
+    only incur MSE; errors beyond that get an extra penalty weighted by beta.
     """
     labels_norm = labels.float() / full_score
     preds = preds.squeeze(-1)
     gap = torch.abs(preds - labels_norm)
 
-    if tolerance > 0:
-        threshold = tolerance / full_score
-        weight = torch.where(
-            gap <= threshold,
-            torch.ones_like(gap),
-            1.0 + (gap - threshold),
-        )
-    else:
-        weight = torch.ones_like(gap)
+    mse = ((preds - labels_norm) ** 2).mean()
 
-    element_loss = (preds - labels_norm) ** 2
-    return (weight * element_loss).mean()
+    margin = 0.5 / full_score
+    excess = torch.clamp(gap - margin, min=0.0)
+    l1_penalty = beta * (excess ** 2).mean()
+
+    return mse + l1_penalty
 
 
 def regression_to_score(preds: torch.Tensor, full_score: float) -> list[float]:

@@ -27,6 +27,7 @@ class TrainingConfig:
     eval_steps: int = 200
     save_steps: int = 500
     tolerance: float = 0.0
+    beta: float = 1.0                                  # margin penalty weight for regression_loss
     # NEW fields:
     pooling: str = "mean"                              # "mean" | "last" | "attention"
     head_hidden_sizes: list[int] = field(default_factory=list)  # e.g. [512, 128], empty=old behavior

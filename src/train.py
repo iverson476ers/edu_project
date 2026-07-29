@@ -93,7 +93,7 @@ def validate(model, dataloader, score_points, device, full_score, tolerance=0.0)
             logits = model(input_ids, attention_mask)
 
             if is_regression:
-                loss = regression_loss(logits, labels_batch, full_score, tolerance)
+                loss = regression_loss(logits, labels_batch, full_score, config.beta)
                 preds = regression_to_score(logits.cpu(), full_score)
                 # Snap to 0.5 grid
                 preds = [round(p / 0.5) * 0.5 for p in preds]
@@ -156,7 +156,7 @@ def train(config: TrainingConfig):
 
             logits = model(input_ids, attention_mask)
             if getattr(model, "head_type", "coral") == "regression":
-                loss = regression_loss(logits, batch["label"].to(device), full_score, config.tolerance)
+                loss = regression_loss(logits, batch["label"].to(device), full_score, config.beta)
             else:
                 loss = coral_loss(logits, label_indices, num_classes)
 
