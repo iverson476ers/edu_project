@@ -13,7 +13,7 @@ from peft import LoraConfig, get_peft_model, TaskType
 from src.config import TrainingConfig
 from src.data_pipeline import load_and_split_data, ASAGDataset
 from src.evaluate import compute_metrics
-from src.model import OrdinalScorer, coral_loss, prediction_to_score, regression_loss, regression_to_score
+from src.model import OrdinalScorer, coral_loss, coral_mix_loss, prediction_to_score, regression_loss, regression_to_score
 
 
 def setup_model_and_tokenizer(
@@ -77,29 +77,38 @@ def get_dataloader(df, tokenizer, config, shuffle=True):
     return DataLoader(ds, batch_size=config.batch_size, shuffle=shuffle)
 
 
-def validate(model, dataloader, score_points, device, full_score, tolerance=0.0, beta=1.0):
+def validate(model, dataloader, score_points, device, full_score, tolerance=0.0, beta=1.0, lambda_reg=0.4):
     model.eval()
     all_preds = []
     all_labels = []
     total_loss = 0.0
     num_samples = 0
-    is_regression = getattr(model, "head_type", "coral") == "regression"
+    head_type = getattr(model, "head_type", "coral")
+    is_regression = head_type == "regression"
+    is_coral_mix = head_type == "coral_mix"
     with torch.no_grad():
         for batch in dataloader:
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
             label_indices = batch["label_idx"].to(device)
             labels_batch = batch["label"].to(device)
-            logits = model(input_ids, attention_mask)
+            output = model(input_ids, attention_mask)
 
-            if is_regression:
-                loss = regression_loss(logits, labels_batch, full_score, beta)
-                preds = regression_to_score(logits.cpu(), full_score)
+            if is_coral_mix:
+                ordinal_logits, reg_value = output
+                loss = coral_mix_loss(ordinal_logits, reg_value, label_indices,
+                                      labels_batch, model.num_classes, full_score,
+                                      lambda_reg)
+                probs = torch.sigmoid(ordinal_logits)
+                preds = prediction_to_score(probs.cpu(), score_points)
+            elif is_regression:
+                loss = regression_loss(output, labels_batch, full_score, beta)
+                preds = regression_to_score(output.cpu(), full_score)
                 # Snap to 0.5 grid
                 preds = [round(p / 0.5) * 0.5 for p in preds]
             else:
-                loss = coral_loss(logits, label_indices, model.num_classes)
-                probs = torch.sigmoid(logits)
+                loss = coral_loss(output, label_indices, model.num_classes)
+                probs = torch.sigmoid(output)
                 preds = prediction_to_score(probs.cpu(), score_points)
 
             total_loss += loss.item() * input_ids.size(0)
@@ -154,11 +163,17 @@ def train(config: TrainingConfig):
             attention_mask = batch["attention_mask"].to(device)
             label_indices = batch["label_idx"].to(device)
 
-            logits = model(input_ids, attention_mask)
-            if getattr(model, "head_type", "coral") == "regression":
-                loss = regression_loss(logits, batch["label"].to(device), full_score, config.beta)
+            output = model(input_ids, attention_mask)
+            head_type = getattr(model, "head_type", "coral")
+            if head_type == "coral_mix":
+                ordinal_logits, reg_value = output
+                loss = coral_mix_loss(ordinal_logits, reg_value, label_indices,
+                                      batch["label"].to(device), num_classes,
+                                      full_score, config.lambda_reg)
+            elif head_type == "regression":
+                loss = regression_loss(output, batch["label"].to(device), full_score, config.beta)
             else:
-                loss = coral_loss(logits, label_indices, num_classes)
+                loss = coral_loss(output, label_indices, num_classes)
 
             optimizer.zero_grad()
             loss.backward()
@@ -173,7 +188,7 @@ def train(config: TrainingConfig):
                 print(f"Step {global_step}: loss={loss.item():.4f}, lr={scheduler.get_last_lr()[0]:.2e}")
 
             if global_step % config.eval_steps == 0:
-                metrics = validate(model, test_loader, score_points, device, full_score, config.tolerance, config.beta)
+                metrics = validate(model, test_loader, score_points, device, full_score, config.tolerance, config.beta, config.lambda_reg)
                 print(f"Eval @ step {global_step}: {metrics}")
                 if metrics["acc"] > best_acc:
                     best_acc = metrics["acc"]
@@ -186,7 +201,7 @@ def train(config: TrainingConfig):
 
         # End of epoch eval
         #metrics = validate(model, test_loader, score_points, device)
-        metrics = validate(model, test_loader, score_points, device, full_score, config.tolerance, config.beta)
+        metrics = validate(model, test_loader, score_points, device, full_score, config.tolerance, config.beta, config.lambda_reg)
         print(f"Epoch {epoch+1}/{config.epochs}: {metrics}")
         if metrics["acc"] > best_acc:
             best_acc = metrics["acc"]
@@ -209,7 +224,7 @@ def train(config: TrainingConfig):
     print(f"Final model saved to {os.path.join(config.output_dir, 'final_model.pt')}")
 
     # Run final validation and save metrics
-    final_metrics = validate(model, test_loader, score_points, device, full_score, config.tolerance, config.beta)
+    final_metrics = validate(model, test_loader, score_points, device, full_score, config.tolerance, config.beta, config.lambda_reg)
     #final_metrics = validate(model, test_loader, score_points, device)
     final_metrics["best_accuracy"] = best_acc
     with open(os.path.join(config.output_dir, "metrics.json"), "w") as f:

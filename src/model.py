@@ -93,6 +93,55 @@ class RegressionHead(nn.Module):
         return torch.sigmoid(self.linear(x))  # (batch, 1) in [0, 1]
 
 
+class CoralMixHead(nn.Module):
+    """Ordinal + Regression head: K classes -> K logits.
+
+    First K-1 outputs: raw logits for ordinal binary classifiers (same as CoralHead).
+    K-th output: sigmoid → [0, 1] regression value.
+
+    Same residual block architecture as CoralHead.
+    """
+
+    def __init__(self, hidden_dim: int, num_classes: int,
+                 hidden_sizes: list[int] | None = None,
+                 dropout: float = 0.1):
+        super().__init__()
+        self.num_classes = num_classes
+        self.hidden_sizes = hidden_sizes or []
+        self.dropout = dropout
+
+        layers = []
+        in_dim = hidden_dim
+        for h in self.hidden_sizes:
+            block = nn.Sequential(
+                nn.LayerNorm(in_dim),
+                nn.Linear(in_dim, h),
+                nn.GELU(),
+                nn.Dropout(dropout),
+            )
+            layers.append(block)
+            proj = nn.Linear(in_dim, h) if in_dim != h else nn.Identity()
+            layers.append(proj)
+            in_dim = h
+
+        self.blocks = nn.ModuleList(layers) if layers else None
+        self.linear = nn.Linear(in_dim, num_classes)  # K outputs
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        # x: (batch, hidden_dim)
+        x = x.to(self.linear.weight.dtype)
+        if self.blocks is not None:
+            for i in range(0, len(self.blocks), 2):
+                block = self.blocks[i]
+                proj = self.blocks[i + 1]
+                residual = proj(x)
+                x = block(x) + residual
+        logits = self.linear(x)              # (batch, K)
+        ordinal_logits = logits[:, :-1]       # (batch, K-1)
+        reg_value = torch.sigmoid(logits[:, -1:])  # (batch, 1) in [0, 1]
+        return ordinal_logits, reg_value
+
+
 class DummyBackbone(nn.Module):
     """Returns random embeddings for local testing without loading Qwen."""
 
@@ -116,8 +165,8 @@ class OrdinalScorer(nn.Module):
     """Qwen backbone + Pooling + Head for scoring.
 
     Args:
-        head_type: "coral" (ordinal, K-1 logits) or "regression" (single [0,1] output).
-                   Defaults to "coral" for backward compatibility.
+        head_type: "coral" (ordinal, K-1 logits), "regression" (single [0,1] output),
+                   or "coral_mix" (K logits: K-1 ordinal + 1 regression).
         pooling: BasePooling instance (defaults to MeanPooling)
         head_config: kwargs dict for the head (hidden_sizes, dropout)
     """
@@ -135,6 +184,8 @@ class OrdinalScorer(nn.Module):
 
         if head_type == "regression":
             self.head = RegressionHead(hidden_dim, **head_kwargs)
+        elif head_type == "coral_mix":
+            self.head = CoralMixHead(hidden_dim, num_classes, **head_kwargs)
         else:
             self.head = CoralHead(hidden_dim, num_classes, **head_kwargs)
 
@@ -171,6 +222,27 @@ def coral_loss(
     for k in range(num_classes - 1):
         targets[:, k] = (label_indices > k).float()
     return F.binary_cross_entropy_with_logits(logits, targets)
+
+
+def coral_mix_loss(
+    ordinal_logits: torch.Tensor,
+    reg_value: torch.Tensor,
+    label_indices: torch.Tensor,
+    labels: torch.Tensor,
+    num_classes: int,
+    full_score: float,
+    lambda_reg: float = 0.4,
+) -> torch.Tensor:
+    """CORAL + MSE mixed loss for CoralMixHead.
+
+    coral_part = coral_loss(ordinal_logits, label_indices, num_classes)
+    mse_part  = MSE(reg_value, labels / full_score)   # both in [0, 1]
+    total = coral_part + lambda_reg * mse_part
+    """
+    coral_part = coral_loss(ordinal_logits, label_indices, num_classes)
+    labels_norm = labels.float() / full_score
+    mse_part = ((reg_value.squeeze(-1) - labels_norm) ** 2).mean()
+    return coral_part + lambda_reg * mse_part
 
 
 def regression_loss(

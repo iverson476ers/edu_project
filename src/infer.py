@@ -78,19 +78,29 @@ def predict(
     device: str = "cuda",
     max_length: int = 2048,
     full_score: float | None = None,
-) -> float:
-    """Predict score for a single text."""
+) -> float | tuple[float, float]:
+    """Predict score for a single text.
+
+    For coral_mix head, returns (coral_score, reg_score).
+    """
     encoded = tokenizer(
         text, max_length=max_length, padding="max_length", truncation=True, return_tensors="pt"
     )
     input_ids = encoded["input_ids"].to(device)
     attention_mask = encoded["attention_mask"].to(device)
     with torch.no_grad():
-        logits = model(input_ids, attention_mask)
-        if getattr(model, "head_type", "coral") == "regression":
-            scores = regression_to_score(logits.cpu(), full_score)
+        output = model(input_ids, attention_mask)
+        head_type = getattr(model, "head_type", "coral")
+        if head_type == "coral_mix":
+            ordinal_logits, reg_value = output
+            probs = torch.sigmoid(ordinal_logits)
+            coral_score = prediction_to_score(probs.cpu(), score_points)[0]
+            reg_score = round(regression_to_score(reg_value.cpu(), full_score)[0] / 0.5) * 0.5
+            return coral_score, reg_score
+        elif head_type == "regression":
+            scores = regression_to_score(output.cpu(), full_score)
         else:
-            probs = torch.sigmoid(logits)
+            probs = torch.sigmoid(output)
             scores = prediction_to_score(probs.cpu(), score_points)
     return scores[0]
 
@@ -103,8 +113,11 @@ def predict_batch(
     device: str = "cuda",
     max_length: int = 2048,
     full_score: float | None = None,
-) -> list[float]:
-    """Predict scores for a batch of texts in one forward pass."""
+) -> list[float] | tuple[list[float], list[float]]:
+    """Predict scores for a batch of texts in one forward pass.
+
+    For coral_mix head, returns (coral_scores, reg_scores).
+    """
     encoded = tokenizer(
         texts,
         max_length=max_length,
@@ -115,11 +128,18 @@ def predict_batch(
     input_ids = encoded["input_ids"].to(device)
     attention_mask = encoded["attention_mask"].to(device)
     with torch.no_grad():
-        logits = model(input_ids, attention_mask)
-        if getattr(model, "head_type", "coral") == "regression":
-            scores = regression_to_score(logits.cpu(), full_score)
+        output = model(input_ids, attention_mask)
+        head_type = getattr(model, "head_type", "coral")
+        if head_type == "coral_mix":
+            ordinal_logits, reg_value = output
+            probs = torch.sigmoid(ordinal_logits).cpu()
+            coral_scores = prediction_to_score(probs, score_points)
+            reg_scores = [round(s / 0.5) * 0.5 for s in regression_to_score(reg_value.cpu(), full_score)]
+            return coral_scores, reg_scores
+        elif head_type == "regression":
+            scores = regression_to_score(output.cpu(), full_score)
         else:
-            probs = torch.sigmoid(logits).cpu()
+            probs = torch.sigmoid(output).cpu()
             scores = prediction_to_score(probs, score_points)
     return scores
 
@@ -169,43 +189,53 @@ if __name__ == "__main__":
     for i, (_, row) in enumerate(df.iterrows()):
         text = row["OCR文字结果"]
         if pd.isna(text) or str(text).strip() == "":
-            skip_entries.append((i, None, "跳过(空文本)"))
+            skip_entries.append((i, None, None, "跳过(空文本)"))
         else:
             texts.append(str(text))
             indices.append(i)
 
     # Run batched inference
+    is_coral_mix = head_type == "coral_mix"
     predictions = []
     for start in tqdm(range(0, len(texts), args.batch_size), desc="Inference"):
         batch_texts = texts[start:start + args.batch_size]
         try:
-            batch_scores = predict_batch(
+            batch_result = predict_batch(
                 batch_texts, model, tokenizer, score_points,
                 device=args.device, max_length=max_length,
                 full_score=full_score,
             )
-            for idx in range(len(batch_texts)):
-                predictions.append((indices[start + idx], batch_scores[idx], "成功"))
+            if is_coral_mix:
+                coral_scores, reg_scores = batch_result
+                for idx in range(len(batch_texts)):
+                    predictions.append((indices[start + idx], coral_scores[idx], reg_scores[idx], "成功"))
+            else:
+                for idx in range(len(batch_texts)):
+                    predictions.append((indices[start + idx], batch_result[idx], None, "成功"))
             torch.cuda.empty_cache()
         except Exception as e:
             for idx in range(len(batch_texts)):
-                predictions.append((indices[start + idx], None, f"失败: {e}"))
+                predictions.append((indices[start + idx], None, None, f"失败: {e}"))
 
     # Merge results back in original order
     all_results = [None] * len(df)
-    for row_idx, score, status in skip_entries:
-        all_results[row_idx] = (score, status)
-    for row_idx, score, status in predictions:
-        all_results[row_idx] = (score, status)
+    for row_idx, coral_score, reg_score, status in skip_entries:
+        all_results[row_idx] = (coral_score, reg_score, status)
+    for row_idx, coral_score, reg_score, status in predictions:
+        all_results[row_idx] = (coral_score, reg_score, status)
 
     # Save output
-    df["预测分数"] = [r[0] for r in all_results]
-    df["处理状态"] = [r[1] for r in all_results]
+    if is_coral_mix:
+        df["预测分数(coral)"] = [r[0] for r in all_results]
+        df["预测分数(reg)"] = [r[1] for r in all_results]
+    else:
+        df["预测分数"] = [r[0] for r in all_results]
+    df["处理状态"] = [r[2] for r in all_results]
     df.to_excel(args.output, index=False)
 
-    success = sum(1 for r in all_results if r[1] == "成功")
-    skip = sum(1 for r in all_results if "跳过" in r[1])
-    fail = sum(1 for r in all_results if "失败" in r[1])
+    success = sum(1 for r in all_results if r[2] == "成功")
+    skip = sum(1 for r in all_results if "跳过" in r[2])
+    fail = sum(1 for r in all_results if "失败" in r[2])
     print(f"Done. 成功={success} 跳过={skip} 失败={fail}")
     print(f"Saved to: {args.output}")
 
