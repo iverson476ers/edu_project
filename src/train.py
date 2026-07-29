@@ -77,7 +77,7 @@ def get_dataloader(df, tokenizer, config, shuffle=True):
     return DataLoader(ds, batch_size=config.batch_size, shuffle=shuffle)
 
 
-def validate(model, dataloader, score_points, device, full_score, tolerance=0.0):
+def validate(model, dataloader, score_points, device, full_score, tolerance=0.0, beta=1.0):
     model.eval()
     all_preds = []
     all_labels = []
@@ -93,7 +93,7 @@ def validate(model, dataloader, score_points, device, full_score, tolerance=0.0)
             logits = model(input_ids, attention_mask)
 
             if is_regression:
-                loss = regression_loss(logits, labels_batch, full_score, config.beta)
+                loss = regression_loss(logits, labels_batch, full_score, beta)
                 preds = regression_to_score(logits.cpu(), full_score)
                 # Snap to 0.5 grid
                 preds = [round(p / 0.5) * 0.5 for p in preds]
@@ -173,7 +173,7 @@ def train(config: TrainingConfig):
                 print(f"Step {global_step}: loss={loss.item():.4f}, lr={scheduler.get_last_lr()[0]:.2e}")
 
             if global_step % config.eval_steps == 0:
-                metrics = validate(model, test_loader, score_points, device, full_score, config.tolerance)
+                metrics = validate(model, test_loader, score_points, device, full_score, config.tolerance, config.beta)
                 print(f"Eval @ step {global_step}: {metrics}")
                 if metrics["acc"] > best_acc:
                     best_acc = metrics["acc"]
@@ -186,7 +186,7 @@ def train(config: TrainingConfig):
 
         # End of epoch eval
         #metrics = validate(model, test_loader, score_points, device)
-        metrics = validate(model, test_loader, score_points, device, full_score, config.tolerance)
+        metrics = validate(model, test_loader, score_points, device, full_score, config.tolerance, config.beta)
         print(f"Epoch {epoch+1}/{config.epochs}: {metrics}")
         if metrics["acc"] > best_acc:
             best_acc = metrics["acc"]
@@ -209,7 +209,7 @@ def train(config: TrainingConfig):
     print(f"Final model saved to {os.path.join(config.output_dir, 'final_model.pt')}")
 
     # Run final validation and save metrics
-    final_metrics = validate(model, test_loader, score_points, device, full_score, config.tolerance)
+    final_metrics = validate(model, test_loader, score_points, device, full_score, config.tolerance, config.beta)
     #final_metrics = validate(model, test_loader, score_points, device)
     final_metrics["best_accuracy"] = best_acc
     with open(os.path.join(config.output_dir, "metrics.json"), "w") as f:
