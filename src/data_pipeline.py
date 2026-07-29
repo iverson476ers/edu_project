@@ -97,10 +97,27 @@ def load_question_config(data_dir: str, subject_id: str, question_id: str) -> di
         return json.load(f)
 
 
+def load_validation_data(data_dir: str, subject_id: str, question_id: str) -> pd.DataFrame:
+    """Load validation data from CSV. Expected columns: BMH, ZZCJ (label)."""
+    pattern = f"{data_dir}/calibration/validation{subject_id}_{question_id}.csv"
+    files = glob.glob(pattern)
+    if not files:
+        raise FileNotFoundError(f"No validation file found matching: {pattern}")
+    df = pd.read_csv(files[0])
+    df = df[["BMH", "ZZCJ"]].copy()
+    df.columns = ["BMH", "label"]
+    df["label"] = df["label"].astype(float)
+    return df.dropna()
+
+
 def load_and_split_data(
     config: "TrainingConfig",
 ) -> tuple:
-    """Load, merge, split data and return (train_df, test_df, score_points, question_config)."""
+    """Load data and return (train_df, test_df, score_points, question_config).
+
+    train_df = all calibration data (merged with answers).
+    test_df  = external validation set loaded from CSV file.
+    """
     from src.config import TrainingConfig
 
     answer_path = f"{config.data_dir}/answer/answer{config.subject_id}_{config.question_id}.xlsx"
@@ -108,14 +125,17 @@ def load_and_split_data(
 
     answer_df = load_answer_data(answer_path)
     calib_df = load_calibration_data(config.data_dir, config.question_id)
-    merged_df = merge_data(answer_df, calib_df)
-    score_points = get_score_points(merged_df)
-    train_df, test_df = split_data(merged_df, config.test_size, config.seed)
+    train_df = merge_data(answer_df, calib_df)
+
+    # Load external validation set
+    val_df = load_validation_data(config.data_dir, config.subject_id, config.question_id)
+    test_df = merge_data(answer_df, val_df)
+
+    score_points = get_score_points(train_df)
 
     print(f"Question: {q_config.get('subject_name', '')} {q_config.get('question_type', '')}")
     print(f"  full_score={q_config['full_score']}, precision={q_config['score_precision']}")
-    print(f"Total labeled samples: {len(merged_df)}")
-    print(f"Train: {len(train_df)}, Test: {len(test_df)}")
+    print(f"Train (calibration): {len(train_df)}, Test (validation): {len(test_df)}")
     print(f"Score points ({len(score_points)}): {score_points[:5]}...{score_points[-3:]}")
 
     return train_df, test_df, score_points, q_config
