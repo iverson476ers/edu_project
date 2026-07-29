@@ -9,14 +9,14 @@ epochs: 5
 test_size: 0.2
 seed: 42
 output_dir: "/root/workspace/sft_model/q9"
-data_dir: "/root/workspace/dataset/data/101"
+data_dir: "/root/workspace/dataset/101"
 question_id: "9"
 subject_id: "101" 
 warmup_ratio: 0.1
 weight_decay: 0.01
 max_grad_norm: 1.0
 logging_steps: 10
-eval_steps: 50
+eval_steps: 20
 save_steps: 100
 tolerance: 6.0
 # Architecture

@@ -1,26 +1,25 @@
 model_name: "/root/workspace/base_model/qwen3-4b"
-max_length: 256
+max_length: 150
 batch_size: 128
 lora_r: 16
 lora_alpha: 32
 lora_dropout: 0.05
 learning_rate: 2.0e-4
-epochs: 7
+epochs: 5
 test_size: 0.2
 seed: 42
-output_dir: "/root/workspace/sft_model/103_q4"
-data_dir: "/root/workspace/dataset/103"
-question_id: "4"
-subject_id: "103"
+output_dir: "/root/workspace/sft_model/q8_v3"
+data_dir: "/root/workspace/dataset/101"
+question_id: "8"
+subject_id: "101"
 warmup_ratio: 0.1
 weight_decay: 0.01
 max_grad_norm: 1.0
 logging_steps: 10
-eval_steps: 40
+eval_steps: 20
 save_steps: 100
-tolerance: 2.0
-
+tolerance: 1.0
 # Architecture
 pooling: "mean"
-head_hidden_sizes: [512, 512]
+head_hidden_sizes: [512]
 head_dropout: 0.1
