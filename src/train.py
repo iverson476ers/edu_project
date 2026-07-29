@@ -95,8 +95,8 @@ def validate(model, dataloader, score_points, device, full_score, tolerance=0.0)
             if is_regression:
                 loss = regression_loss(logits, labels_batch, full_score, tolerance)
                 preds = regression_to_score(logits.cpu(), full_score)
-                # Round to nearest score_point for discrete metrics
-                preds = [min(score_points, key=lambda sp: abs(p - sp)) for p in preds]
+                # Snap to 0.5 grid
+                preds = [round(p / 0.5) * 0.5 for p in preds]
             else:
                 loss = coral_loss(logits, label_indices, model.num_classes)
                 probs = torch.sigmoid(logits)
