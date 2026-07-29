@@ -90,16 +90,17 @@ def compute_metrics(
     preds: list[float], labels: list[float], tolerance: float | None = None
 ) -> dict[str, float]:
     metrics = {
-        "exact_accuracy": exact_accuracy(preds, labels),
-        "mae": mae(preds, labels),
-        "rmse": rmse(preds, labels),
         "qwk": qwk(preds, labels),
         "kappa": kappa(preds, labels),
+        "acc": exact_accuracy(preds, labels),
+        "acc_0.5": acc_within(preds, labels, 0.5),
+        "rmse": rmse(preds, labels),
+        "mae": mae(preds, labels),
         "pearson": pearson(preds, labels),
         "spearman": spearman(preds, labels),
-        "acc_0.5": acc_within(preds, labels, 0.5),
     }
     if tolerance is not None:
-        metrics[f"tolerance_acc({tolerance})"] = tolerance_accuracy(preds, labels, tolerance)
-        metrics[f"tolerance_qwk({tolerance})"] = tolerance_qwk(preds, labels, tolerance)
+        metrics["Tacc"] = tolerance_accuracy(preds, labels, tolerance)
+        metrics["Tqwk"] = tolerance_qwk(preds, labels, tolerance)
+
     return metrics
