@@ -175,8 +175,8 @@ def train(config: TrainingConfig):
             if global_step % config.eval_steps == 0:
                 metrics = validate(model, test_loader, score_points, device, full_score, config.tolerance)
                 print(f"Eval @ step {global_step}: {metrics}")
-                if metrics["exact_accuracy"] > best_acc:
-                    best_acc = metrics["exact_accuracy"]
+                if metrics["acc"] > best_acc:
+                    best_acc = metrics["acc"]
                     torch.save(
                         {"model_state_dict": model.state_dict(), "config": config, "score_points": score_points, "full_score": full_score},
                         os.path.join(config.output_dir, "best_model.pt"),
@@ -188,8 +188,8 @@ def train(config: TrainingConfig):
         #metrics = validate(model, test_loader, score_points, device)
         metrics = validate(model, test_loader, score_points, device, full_score, config.tolerance)
         print(f"Epoch {epoch+1}/{config.epochs}: {metrics}")
-        if metrics["exact_accuracy"] > best_acc:
-            best_acc = metrics["exact_accuracy"]
+        if metrics["acc"] > best_acc:
+            best_acc = metrics["acc"]
             torch.save(
                 {"model_state_dict": model.state_dict(), "config": config, "score_points": score_points, "full_score": full_score},
                 os.path.join(config.output_dir, "best_model.pt"),
