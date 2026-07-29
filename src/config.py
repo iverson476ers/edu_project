@@ -31,6 +31,7 @@ class TrainingConfig:
     pooling: str = "mean"                              # "mean" | "last" | "attention"
     head_hidden_sizes: list[int] = field(default_factory=list)  # e.g. [512, 128], empty=old behavior
     head_dropout: float = 0.1
+    head_type: str = "coral"                           # "coral" | "regression"
 
 
 def load_config(yaml_path: str) -> TrainingConfig:

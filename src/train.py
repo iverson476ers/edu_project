@@ -13,7 +13,7 @@ from peft import LoraConfig, get_peft_model, TaskType
 from src.config import TrainingConfig
 from src.data_pipeline import load_and_split_data, ASAGDataset
 from src.evaluate import compute_metrics
-from src.model import OrdinalScorer, coral_loss, prediction_to_score
+from src.model import OrdinalScorer, coral_loss, prediction_to_score, regression_loss, regression_to_score
 
 
 def setup_model_and_tokenizer(
@@ -63,7 +63,8 @@ def setup_model_and_tokenizer(
         "dropout": config.head_dropout,
     }
     model = OrdinalScorer(backbone, hidden_dim, num_classes,
-                          pooling=pooling, head_config=head_config)
+                          pooling=pooling, head_config=head_config,
+                          head_type=getattr(config, "head_type", "coral"))
 
     # Enable gradient checkpointing
     backbone.gradient_checkpointing_enable()
@@ -76,25 +77,35 @@ def get_dataloader(df, tokenizer, config, shuffle=True):
     return DataLoader(ds, batch_size=config.batch_size, shuffle=shuffle)
 
 
-def validate(model, dataloader, score_points, device, tolerance=0.0):
+def validate(model, dataloader, score_points, device, full_score, tolerance=0.0):
     model.eval()
     all_preds = []
     all_labels = []
     total_loss = 0.0
     num_samples = 0
+    is_regression = getattr(model, "head_type", "coral") == "regression"
     with torch.no_grad():
         for batch in dataloader:
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
             label_indices = batch["label_idx"].to(device)
+            labels_batch = batch["label"].to(device)
             logits = model(input_ids, attention_mask)
-            loss = coral_loss(logits, label_indices, model.num_classes)
+
+            if is_regression:
+                loss = regression_loss(logits, labels_batch, full_score)
+                preds = regression_to_score(logits.cpu(), full_score)
+                # Round to nearest score_point for discrete metrics
+                preds = [min(score_points, key=lambda sp: abs(p - sp)) for p in preds]
+            else:
+                loss = coral_loss(logits, label_indices, model.num_classes)
+                probs = torch.sigmoid(logits)
+                preds = prediction_to_score(probs.cpu(), score_points)
+
             total_loss += loss.item() * input_ids.size(0)
             num_samples += input_ids.size(0)
-            probs = torch.sigmoid(logits)
-            preds = prediction_to_score(probs.cpu(), score_points)
             all_preds.extend(preds)
-            all_labels.extend(batch["label"].tolist())
+            all_labels.extend(labels_batch.tolist())
     metrics = compute_metrics(all_preds, all_labels, tolerance=tolerance if tolerance > 0 else None)
     metrics["val_loss"] = total_loss / num_samples
     return metrics
@@ -105,8 +116,9 @@ def train(config: TrainingConfig):
     torch.manual_seed(config.seed)
 
     # 1. Load data
-    train_df, test_df, score_points = load_and_split_data(config)
+    train_df, test_df, score_points, q_config = load_and_split_data(config)
     num_classes = len(score_points)
+    full_score = float(q_config["full_score"])
 
     # 2. Setup model
     model, tokenizer = setup_model_and_tokenizer(config, num_classes)
@@ -143,7 +155,10 @@ def train(config: TrainingConfig):
             label_indices = batch["label_idx"].to(device)
 
             logits = model(input_ids, attention_mask)
-            loss = coral_loss(logits, label_indices, num_classes)
+            if getattr(model, "head_type", "coral") == "regression":
+                loss = regression_loss(logits, batch["label"].to(device), full_score)
+            else:
+                loss = coral_loss(logits, label_indices, num_classes)
 
             optimizer.zero_grad()
             loss.backward()
@@ -158,7 +173,7 @@ def train(config: TrainingConfig):
                 print(f"Step {global_step}: loss={loss.item():.4f}, lr={scheduler.get_last_lr()[0]:.2e}")
 
             if global_step % config.eval_steps == 0:
-                metrics = validate(model, test_loader, score_points, device, config.tolerance)
+                metrics = validate(model, test_loader, score_points, device, full_score, config.tolerance)
                 print(f"Eval @ step {global_step}: {metrics}")
                 if metrics["exact_accuracy"] > best_acc:
                     best_acc = metrics["exact_accuracy"]
@@ -171,7 +186,7 @@ def train(config: TrainingConfig):
 
         # End of epoch eval
         #metrics = validate(model, test_loader, score_points, device)
-        metrics = validate(model, test_loader, score_points, device, config.tolerance)
+        metrics = validate(model, test_loader, score_points, device, full_score, config.tolerance)
         print(f"Epoch {epoch+1}/{config.epochs}: {metrics}")
         if metrics["exact_accuracy"] > best_acc:
             best_acc = metrics["exact_accuracy"]
@@ -194,7 +209,7 @@ def train(config: TrainingConfig):
     print(f"Final model saved to {os.path.join(config.output_dir, 'final_model.pt')}")
 
     # Run final validation and save metrics
-    final_metrics = validate(model, test_loader, score_points, device, config.tolerance)
+    final_metrics = validate(model, test_loader, score_points, device, full_score, config.tolerance)
     #final_metrics = validate(model, test_loader, score_points, device)
     final_metrics["best_accuracy"] = best_acc
     with open(os.path.join(config.output_dir, "metrics.json"), "w") as f:

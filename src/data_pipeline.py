@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import glob
+import json
+
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset
@@ -88,13 +90,21 @@ class ASAGDataset(Dataset):
         }
 
 
+def load_question_config(data_dir: str, subject_id: str, question_id: str) -> dict:
+    """Read question JSON config, e.g. {full_score, score_precision, ...}."""
+    path = f"{data_dir}/question/question{subject_id}_{question_id}.json"
+    with open(path, "r") as f:
+        return json.load(f)
+
+
 def load_and_split_data(
     config: "TrainingConfig",
 ) -> tuple:
-    """Load, merge, split data and return (train_df, test_df, score_points)."""
+    """Load, merge, split data and return (train_df, test_df, score_points, question_config)."""
     from src.config import TrainingConfig
 
     answer_path = f"{config.data_dir}/answer/answer{config.subject_id}_{config.question_id}.xlsx"
+    q_config = load_question_config(config.data_dir, config.subject_id, config.question_id)
 
     answer_df = load_answer_data(answer_path)
     calib_df = load_calibration_data(config.data_dir, config.question_id)
@@ -102,8 +112,10 @@ def load_and_split_data(
     score_points = get_score_points(merged_df)
     train_df, test_df = split_data(merged_df, config.test_size, config.seed)
 
+    print(f"Question: {q_config.get('subject_name', '')} {q_config.get('question_type', '')}")
+    print(f"  full_score={q_config['full_score']}, precision={q_config['score_precision']}")
     print(f"Total labeled samples: {len(merged_df)}")
     print(f"Train: {len(train_df)}, Test: {len(test_df)}")
     print(f"Score points ({len(score_points)}): {score_points[:5]}...{score_points[-3:]}")
 
-    return train_df, test_df, score_points
+    return train_df, test_df, score_points, q_config

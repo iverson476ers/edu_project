@@ -8,10 +8,10 @@ echo "[1/5] Config loading..."
 $PY -c "from src.config import load_config; cfg=load_config('configs/q8_config.yaml'); print('OK:', cfg.question_id)"
 
 echo "[2/5] Data pipeline Q8..."
-$PY -c "from src.data_pipeline import load_and_split_data; from src.config import load_config; cfg=load_config('configs/q8_config.yaml'); t, v, sp = load_and_split_data(cfg); print(f'OK: train={len(t)}, test={len(v)}, scores={len(sp)}')"
+$PY -c "from src.data_pipeline import load_and_split_data; from src.config import load_config; cfg=load_config('configs/q8_config.yaml'); t, v, sp, qc = load_and_split_data(cfg); print(f'OK: train={len(t)}, test={len(v)}, scores={len(sp)}, full_score={qc[\"full_score\"]}')"
 
 echo "[3/5] Data pipeline Q9..."
-$PY -c "from src.data_pipeline import load_and_split_data; from src.config import load_config; cfg=load_config('configs/q9_config.yaml'); t, v, sp = load_and_split_data(cfg); print(f'OK: train={len(t)}, test={len(v)}, scores={len(sp)}')"
+$PY -c "from src.data_pipeline import load_and_split_data; from src.config import load_config; cfg=load_config('configs/q9_config.yaml'); t, v, sp, qc = load_and_split_data(cfg); print(f'OK: train={len(t)}, test={len(v)}, scores={len(sp)}, full_score={qc[\"full_score\"]}')"
 
 echo "[4/5] Model + Pooling + Head shapes..."
 $PY -c "

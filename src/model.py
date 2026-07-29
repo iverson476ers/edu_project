@@ -50,6 +50,49 @@ class CoralHead(nn.Module):
         return self.linear(x)  # (batch, K-1)
 
 
+class RegressionHead(nn.Module):
+    """Regression head: outputs a single [0,1] score via sigmoid.
+
+    Same residual block architecture as CoralHead but projects to 1 dimension.
+    Multiply by full_score to recover the original scale.
+    """
+
+    def __init__(self, hidden_dim: int,
+                 hidden_sizes: list[int] | None = None,
+                 dropout: float = 0.1):
+        super().__init__()
+        self.hidden_sizes = hidden_sizes or []
+        self.dropout = dropout
+
+        layers = []
+        in_dim = hidden_dim
+        for h in self.hidden_sizes:
+            block = nn.Sequential(
+                nn.LayerNorm(in_dim),
+                nn.Linear(in_dim, h),
+                nn.GELU(),
+                nn.Dropout(dropout),
+            )
+            layers.append(block)
+            proj = nn.Linear(in_dim, h) if in_dim != h else nn.Identity()
+            layers.append(proj)
+            in_dim = h
+
+        self.blocks = nn.ModuleList(layers) if layers else None
+        self.linear = nn.Linear(in_dim, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (batch, hidden_dim)
+        x = x.to(self.linear.weight.dtype)
+        if self.blocks is not None:
+            for i in range(0, len(self.blocks), 2):
+                block = self.blocks[i]
+                proj = self.blocks[i + 1]
+                residual = proj(x)
+                x = block(x) + residual
+        return torch.sigmoid(self.linear(x))  # (batch, 1) in [0, 1]
+
+
 class DummyBackbone(nn.Module):
     """Returns random embeddings for local testing without loading Qwen."""
 
@@ -70,22 +113,31 @@ class DummyBackbone(nn.Module):
 
 
 class OrdinalScorer(nn.Module):
-    """Qwen backbone + Pooling + CoralHead for ordinal regression scoring.
+    """Qwen backbone + Pooling + Head for scoring.
 
     Args:
+        head_type: "coral" (ordinal, K-1 logits) or "regression" (single [0,1] output).
+                   Defaults to "coral" for backward compatibility.
         pooling: BasePooling instance (defaults to MeanPooling)
-        head_config: kwargs dict for CoralHead (hidden_sizes, dropout)
+        head_config: kwargs dict for the head (hidden_sizes, dropout)
     """
 
-    def __init__(self, backbone: nn.Module, hidden_dim: int, num_classes: int,
+    def __init__(self, backbone: nn.Module, hidden_dim: int, num_classes: int = 2,
                  pooling: nn.Module | None = None,
-                 head_config: dict | None = None):
+                 head_config: dict | None = None,
+                 head_type: str = "coral"):
         super().__init__()
         from src.pooling import MeanPooling
         self.backbone = backbone
         self.pooling = pooling or MeanPooling()
+        self.head_type = head_type
         head_kwargs = head_config or {}
-        self.head = CoralHead(hidden_dim, num_classes, **head_kwargs)
+
+        if head_type == "regression":
+            self.head = RegressionHead(hidden_dim, **head_kwargs)
+        else:
+            self.head = CoralHead(hidden_dim, num_classes, **head_kwargs)
+
         self.num_classes = num_classes
 
     def forward(self, input_ids, attention_mask=None,
@@ -102,7 +154,7 @@ class OrdinalScorer(nn.Module):
         if handcrafted_features is not None:
             pooled = torch.cat([pooled, handcrafted_features], dim=-1)
 
-        return self.head(pooled)  # (batch, K-1)
+        return self.head(pooled)  # (batch, K-1) for coral, (batch, 1) for regression
 
 
 def coral_loss(
@@ -119,6 +171,32 @@ def coral_loss(
     for k in range(num_classes - 1):
         targets[:, k] = (label_indices > k).float()
     return F.binary_cross_entropy_with_logits(logits, targets)
+
+
+def regression_loss(
+    preds: torch.Tensor, labels: torch.Tensor, full_score: float
+) -> torch.Tensor:
+    """MSE loss for regression head: both preds and labels are in [0,1].
+
+    Args:
+        preds: (batch, 1) — sigmoid output from RegressionHead
+        labels: (batch,) — raw scores in original scale
+        full_score: maximum possible score for normalization
+    """
+    labels_norm = labels.float() / full_score
+    return F.mse_loss(preds.squeeze(-1), labels_norm)
+
+
+def regression_to_score(preds: torch.Tensor, full_score: float) -> list[float]:
+    """Convert normalized predictions back to original score scale.
+
+    Args:
+        preds: (batch, 1) — sigmoid output in [0,1]
+        full_score: maximum possible score
+    Returns:
+        list of float scores
+    """
+    return (preds.squeeze(-1) * full_score).tolist()
 
 
 def prediction_to_score(probs: torch.Tensor, score_points: list[float]) -> list[float]:
