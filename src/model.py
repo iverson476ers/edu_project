@@ -174,17 +174,31 @@ def coral_loss(
 
 
 def regression_loss(
-    preds: torch.Tensor, labels: torch.Tensor, full_score: float
+    preds: torch.Tensor, labels: torch.Tensor, full_score: float,
+    tolerance: float = 0.0,
 ) -> torch.Tensor:
-    """MSE loss for regression head: both preds and labels are in [0,1].
+    """Tolerance-aware weighted MSE for regression head.
 
-    Args:
-        preds: (batch, 1) — sigmoid output from RegressionHead
-        labels: (batch,) — raw scores in original scale
-        full_score: maximum possible score for normalization
+    gap = |pred - label / full_score|  (both in [0,1])
+    If gap <= tolerance/full_score: weight = 1
+    Else: weight = 1 + (gap - tolerance/full_score)
     """
     labels_norm = labels.float() / full_score
-    return F.mse_loss(preds.squeeze(-1), labels_norm)
+    preds = preds.squeeze(-1)
+    gap = torch.abs(preds - labels_norm)
+
+    if tolerance > 0:
+        threshold = tolerance / full_score
+        weight = torch.where(
+            gap <= threshold,
+            torch.ones_like(gap),
+            1.0 + (gap - threshold),
+        )
+    else:
+        weight = torch.ones_like(gap)
+
+    element_loss = (preds - labels_norm) ** 2
+    return (weight * element_loss).mean()
 
 
 def regression_to_score(preds: torch.Tensor, full_score: float) -> list[float]:
