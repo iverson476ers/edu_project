@@ -181,13 +181,14 @@ class OrdinalScorer(nn.Module):
         self.pooling = pooling or MeanPooling()
         self.head_type = head_type
         head_kwargs = head_config or {}
+        head_input_dim = getattr(self.pooling, 'output_dim', hidden_dim)
 
         if head_type == "regression":
-            self.head = RegressionHead(hidden_dim, **head_kwargs)
+            self.head = RegressionHead(head_input_dim, **head_kwargs)
         elif head_type == "coral_mix":
-            self.head = CoralMixHead(hidden_dim, num_classes, **head_kwargs)
+            self.head = CoralMixHead(head_input_dim, num_classes, **head_kwargs)
         else:
-            self.head = CoralHead(hidden_dim, num_classes, **head_kwargs)
+            self.head = CoralHead(head_input_dim, num_classes, **head_kwargs)
 
         self.num_classes = num_classes
 

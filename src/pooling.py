@@ -50,20 +50,17 @@ class AttentionPooling(BasePooling):
 
 
 class MultiLayerPooling(BasePooling):
-    """Mean-pool last num_layers hidden states, concatenate, then project back to hidden_dim.
+    """Mean-pool last num_layers hidden states, concatenate, LayerNorm.
 
     Uses hidden states from multiple transformer layers for richer representation.
-    Extra params: Linear(hidden_dim * num_layers, hidden_dim).
+    Output dim = hidden_dim * num_layers. Extra params: LayerNorm only.
     """
 
     def __init__(self, hidden_dim: int, num_layers: int = 4):
         super().__init__()
         self.num_layers = num_layers
-        concat_dim = hidden_dim * num_layers
-        self.norm = nn.LayerNorm(concat_dim)
-        self.proj = nn.Linear(concat_dim, hidden_dim)
-        nn.init.xavier_uniform_(self.proj.weight)
-        nn.init.zeros_(self.proj.bias)
+        self.output_dim = hidden_dim * num_layers
+        self.norm = nn.LayerNorm(self.output_dim)
 
     def forward(self, hidden_states, attention_mask: torch.Tensor) -> torch.Tensor:
         # hidden_states: tuple of (batch, seq_len, hidden_dim) from all layers
@@ -76,9 +73,7 @@ class MultiLayerPooling(BasePooling):
             counts = mask.sum(dim=1).clamp(min=1)
             pooled.append(summed / counts)
         concat = torch.cat(pooled, dim=-1)  # (batch, hidden_dim * num_layers)
-        concat = self.norm(concat)           # stabilize multi-layer concat
-        concat = concat.to(self.proj.weight.dtype)
-        return self.proj(concat)             # (batch, hidden_dim)
+        return self.norm(concat)             # (batch, hidden_dim)
 
 
 def build_pooling(strategy: str, hidden_dim: int, **kwargs) -> BasePooling:
