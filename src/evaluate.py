@@ -42,12 +42,12 @@ def acc_within(preds: list[float], labels: list[float], threshold: float) -> flo
 
 def pearson(preds: list[float], labels: list[float]) -> float:
     r, _ = stats.pearsonr(preds, labels)
-    return r
+    return float(r)
 
 
 def spearman(preds: list[float], labels: list[float]) -> float:
     rho, _ = stats.spearmanr(preds, labels)
-    return rho
+    return float(rho)
 
 
 def qwk(preds: list[float], labels: list[float]) -> float:
