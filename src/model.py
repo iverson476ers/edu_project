@@ -241,16 +241,17 @@ def coral_mix_loss(
     lambda_reg: float = 0.4,
     pos_weight: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    """CORAL + MSE mixed loss for CoralMixHead.
+    """CORAL + Huber mixed loss for CoralMixHead.
 
     coral_part = coral_loss(ordinal_logits, label_indices, num_classes)
-    mse_part  = MSE(reg_value, labels / full_score)   # both in [0, 1]
-    total = coral_part + lambda_reg * mse_part
+    huber_part = SmoothL1(reg_value, labels / full_score)
+    total = coral_part + lambda_reg * huber_part
     """
     coral_part = coral_loss(ordinal_logits, label_indices, num_classes, pos_weight=pos_weight)
     labels_norm = labels.float() / full_score
-    mse_part = ((reg_value.squeeze(-1) - labels_norm) ** 2).mean()
-    return coral_part + lambda_reg * mse_part
+    # mse_part = ((reg_value.squeeze(-1) - labels_norm) ** 2).mean()
+    huber_part = F.smooth_l1_loss(reg_value.squeeze(-1), labels_norm, beta=0.2)
+    return coral_part + lambda_reg * huber_part
 
 
 def regression_loss(
