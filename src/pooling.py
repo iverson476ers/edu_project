@@ -59,7 +59,11 @@ class MultiLayerPooling(BasePooling):
     def __init__(self, hidden_dim: int, num_layers: int = 4):
         super().__init__()
         self.num_layers = num_layers
-        self.proj = nn.Linear(hidden_dim * num_layers, hidden_dim)
+        concat_dim = hidden_dim * num_layers
+        self.norm = nn.LayerNorm(concat_dim)
+        self.proj = nn.Linear(concat_dim, hidden_dim)
+        nn.init.xavier_uniform_(self.proj.weight)
+        nn.init.zeros_(self.proj.bias)
 
     def forward(self, hidden_states, attention_mask: torch.Tensor) -> torch.Tensor:
         # hidden_states: tuple of (batch, seq_len, hidden_dim) from all layers
@@ -72,7 +76,8 @@ class MultiLayerPooling(BasePooling):
             counts = mask.sum(dim=1).clamp(min=1)
             pooled.append(summed / counts)
         concat = torch.cat(pooled, dim=-1)  # (batch, hidden_dim * num_layers)
-        concat = concat.to(self.proj.weight.dtype)  # ensure float32 for Linear
+        concat = self.norm(concat)           # stabilize multi-layer concat
+        concat = concat.to(self.proj.weight.dtype)
         return self.proj(concat)             # (batch, hidden_dim)
 
 
