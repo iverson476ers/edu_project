@@ -125,22 +125,20 @@ class CoralMixHead(nn.Module):
             in_dim = h
 
         self.blocks = nn.ModuleList(layers) if layers else None
-        self.linear = nn.Linear(in_dim, num_classes)  # K outputs
-        self.norm = nn.LayerNorm(num_classes)          # stabilize ordinal + reg logits
+        self.ord_linear = nn.Linear(in_dim, num_classes - 1)  # K-1 ordinal logits
+        self.reg_linear = nn.Linear(in_dim, 1)                # 1 regression logit
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         # x: (batch, hidden_dim)
-        x = x.to(self.linear.weight.dtype)
+        x = x.to(self.ord_linear.weight.dtype)
         if self.blocks is not None:
             for i in range(0, len(self.blocks), 2):
                 block = self.blocks[i]
                 proj = self.blocks[i + 1]
                 residual = proj(x)
                 x = block(x) + residual
-        logits = self.linear(x)              # (batch, K)
-        logits = self.norm(logits)           # (batch, K) — keep ord/reg in same scale
-        ordinal_logits = logits[:, :-1]       # (batch, K-1)
-        reg_value = torch.sigmoid(logits[:, -1:])  # (batch, 1) in [0, 1]
+        ordinal_logits = self.ord_linear(x)                   # (batch, K-1)
+        reg_value = torch.sigmoid(self.reg_linear(x))          # (batch, 1) in [0, 1]
         return ordinal_logits, reg_value
 
 
