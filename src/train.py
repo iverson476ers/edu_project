@@ -117,6 +117,20 @@ def validate(model, dataloader, score_points, device, full_score, tolerance=0.0,
             all_labels.extend(labels_batch.tolist())
     metrics = compute_metrics(all_preds, all_labels, tolerance=tolerance if tolerance > 0 else None)
     metrics["val_loss"] = total_loss / num_samples
+
+    # Per-score-point error monitoring
+    from collections import defaultdict
+    per_score = defaultdict(list)
+    for p, l in zip(all_preds, all_labels):
+        per_score[l].append(abs(p - l))
+    per_score_mae = {}
+    for score in sorted(per_score.keys()):
+        vals = per_score[score]
+        mae = sum(vals) / len(vals)
+        per_score_mae[str(score)] = round(mae, 3)
+        print(f"  score {score:>5.1f} (n={len(vals):>4}): MAE={mae:.3f}")
+    metrics["per_score_mae"] = per_score_mae
+
     return metrics
 
 
