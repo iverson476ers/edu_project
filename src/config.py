@@ -34,7 +34,7 @@ class TrainingConfig:
     head_lr_mult: float = 5.0                            # head LR multiplier relative to backbone LR
     # NEW fields:
     pooling: str = "mean"                              # "mean" | "last" | "attention" | "multi_layer"
-    pooling_num_layers: int = 4                          # number of layers for multi_layer pooling
+    pooling_num_layers: int = 2                          # number of layers for multi_layer pooling
     head_hidden_sizes: list[int] = field(default_factory=list)  # e.g. [512, 128], empty=old behavior
     head_dropout: float = 0.1
     head_type: str = "coral"                           # "coral" | "regression" | "coral_mix"
