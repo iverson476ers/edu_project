@@ -55,7 +55,8 @@ def load_scorer(checkpoint_path: str, device: str = "cuda"):
     hidden_dim = backbone.config.hidden_size
     from src.pooling import build_pooling
     pooling_strategy = getattr(config, "pooling", "mean")
-    pooling = build_pooling(pooling_strategy, hidden_dim)
+    pooling_num_layers = getattr(config, "pooling_num_layers", 4)
+    pooling = build_pooling(pooling_strategy, hidden_dim, num_layers=pooling_num_layers)
     head_config = {
         "hidden_sizes": getattr(config, "head_hidden_sizes", []),
         "dropout": getattr(config, "head_dropout", 0.1),

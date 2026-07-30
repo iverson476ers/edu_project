@@ -199,7 +199,12 @@ class OrdinalScorer(nn.Module):
         hidden = outputs.hidden_states[-1]  # (batch, seq_len, hidden_dim)
         if attention_mask is None:
             attention_mask = torch.ones(hidden.size(0), hidden.size(1), device=hidden.device)
-        pooled = self.pooling(hidden, attention_mask)  # (batch, hidden_dim)
+
+        from src.pooling import MultiLayerPooling
+        if isinstance(self.pooling, MultiLayerPooling):
+            pooled = self.pooling(outputs.hidden_states, attention_mask)
+        else:
+            pooled = self.pooling(hidden, attention_mask)
 
         # Reserved: concat handcrafted features here in the future
         if handcrafted_features is not None:

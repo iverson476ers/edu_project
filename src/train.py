@@ -57,7 +57,7 @@ def setup_model_and_tokenizer(
     # Old: model = OrdinalScorer(backbone, hidden_dim, num_classes)
     # New:
     from src.pooling import build_pooling
-    pooling = build_pooling(config.pooling, hidden_dim)
+    pooling = build_pooling(config.pooling, hidden_dim, num_layers=config.pooling_num_layers)
     head_config = {
         "hidden_sizes": config.head_hidden_sizes,
         "dropout": config.head_dropout,

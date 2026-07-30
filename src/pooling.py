@@ -49,7 +49,33 @@ class AttentionPooling(BasePooling):
         return (hidden_states * weights).sum(dim=1)            # (B, D)
 
 
-def build_pooling(strategy: str, hidden_dim: int) -> BasePooling:
+class MultiLayerPooling(BasePooling):
+    """Mean-pool last num_layers hidden states, concatenate, then project back to hidden_dim.
+
+    Uses hidden states from multiple transformer layers for richer representation.
+    Extra params: Linear(hidden_dim * num_layers, hidden_dim).
+    """
+
+    def __init__(self, hidden_dim: int, num_layers: int = 4):
+        super().__init__()
+        self.num_layers = num_layers
+        self.proj = nn.Linear(hidden_dim * num_layers, hidden_dim)
+
+    def forward(self, hidden_states, attention_mask: torch.Tensor) -> torch.Tensor:
+        # hidden_states: tuple of (batch, seq_len, hidden_dim) from all layers
+        pooled = []
+        mask = attention_mask.unsqueeze(-1).to(dtype=hidden_states[-1].dtype,
+                                                device=hidden_states[-1].device)
+        for layer_hidden in hidden_states[-self.num_layers:]:
+            masked = layer_hidden * mask
+            summed = masked.sum(dim=1)
+            counts = mask.sum(dim=1).clamp(min=1)
+            pooled.append(summed / counts)
+        concat = torch.cat(pooled, dim=-1)  # (batch, hidden_dim * num_layers)
+        return self.proj(concat)             # (batch, hidden_dim)
+
+
+def build_pooling(strategy: str, hidden_dim: int, **kwargs) -> BasePooling:
     """Factory: return the pooling module for a given strategy name."""
     if strategy == "mean":
         return MeanPooling()
@@ -57,5 +83,8 @@ def build_pooling(strategy: str, hidden_dim: int) -> BasePooling:
         return LastTokenPooling()
     elif strategy == "attention":
         return AttentionPooling(hidden_dim)
+    elif strategy == "multi_layer":
+        num_layers = kwargs.get("num_layers", 4)
+        return MultiLayerPooling(hidden_dim, num_layers)
     else:
-        raise ValueError(f"Unknown pooling strategy: {strategy}. Use 'mean', 'last', or 'attention'.")
+        raise ValueError(f"Unknown pooling strategy: {strategy}. Use 'mean', 'last', 'attention', or 'multi_layer'.")
