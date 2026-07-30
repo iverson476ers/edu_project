@@ -215,7 +215,8 @@ class OrdinalScorer(nn.Module):
 
 
 def coral_loss(
-    logits: torch.Tensor, label_indices: torch.Tensor, num_classes: int
+    logits: torch.Tensor, label_indices: torch.Tensor, num_classes: int,
+    pos_weight: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """CORAL loss: K classes -> K-1 binary classifers.
 
@@ -227,7 +228,7 @@ def coral_loss(
     targets = torch.zeros_like(logits)  # (batch, K-1)
     for k in range(num_classes - 1):
         targets[:, k] = (label_indices > k).float()
-    return F.binary_cross_entropy_with_logits(logits, targets)
+    return F.binary_cross_entropy_with_logits(logits, targets, pos_weight=pos_weight)
 
 
 def coral_mix_loss(
@@ -238,6 +239,7 @@ def coral_mix_loss(
     num_classes: int,
     full_score: float,
     lambda_reg: float = 0.4,
+    pos_weight: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """CORAL + MSE mixed loss for CoralMixHead.
 
@@ -245,7 +247,7 @@ def coral_mix_loss(
     mse_part  = MSE(reg_value, labels / full_score)   # both in [0, 1]
     total = coral_part + lambda_reg * mse_part
     """
-    coral_part = coral_loss(ordinal_logits, label_indices, num_classes)
+    coral_part = coral_loss(ordinal_logits, label_indices, num_classes, pos_weight=pos_weight)
     labels_norm = labels.float() / full_score
     mse_part = ((reg_value.squeeze(-1) - labels_norm) ** 2).mean()
     return coral_part + lambda_reg * mse_part
