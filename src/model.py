@@ -251,7 +251,7 @@ def coral_mix_loss(
     labels_norm = labels.float() / full_score
     # mse_part = ((reg_value.squeeze(-1) - labels_norm) ** 2).mean()
     huber_part = F.smooth_l1_loss(reg_value.squeeze(-1), labels_norm, beta=0.2)
-    return coral_part + lambda_reg * huber_part
+    return (1 - lambda_reg) * coral_part + lambda_reg * huber_part
 
 
 def regression_loss(
