@@ -137,12 +137,23 @@ def train(config: TrainingConfig):
     train_loader = get_dataloader(train_df, tokenizer, config, shuffle=True)
     test_loader = get_dataloader(test_df, tokenizer, config, shuffle=False)
 
-    # 4. Optimizer & scheduler
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=config.learning_rate,
-        weight_decay=config.weight_decay,
-    )
+    # 4. Optimizer & scheduler (split LR: head > backbone)
+    head_params = []
+    lora_params = []
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        if name.startswith("head.") or name.startswith("pooling."):
+            head_params.append(param)
+        else:
+            lora_params.append(param)
+
+    optimizer = torch.optim.AdamW([
+        {"params": lora_params, "lr": config.learning_rate},
+        {"params": head_params, "lr": config.learning_rate * config.head_lr_mult},
+    ], weight_decay=config.weight_decay)
+    print(f"Optimizer: lora_params={len(lora_params)}, head_params={len(head_params)}, "
+          f"lora_lr={config.learning_rate}, head_lr={config.learning_rate * config.head_lr_mult}")
     total_steps = len(train_loader) * config.epochs
     warmup_steps = int(total_steps * config.warmup_ratio)
     scheduler = get_cosine_schedule_with_warmup(

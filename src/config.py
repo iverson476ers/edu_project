@@ -29,6 +29,7 @@ class TrainingConfig:
     tolerance: float = 0.0
     beta: float = 1.0                                  # margin penalty weight for regression_loss
     lambda_reg: float = 0.4                             # regression loss weight in coral_mix_loss
+    head_lr_mult: float = 5.0                            # head LR multiplier relative to backbone LR
     # NEW fields:
     pooling: str = "mean"                              # "mean" | "last" | "attention"
     head_hidden_sizes: list[int] = field(default_factory=list)  # e.g. [512, 128], empty=old behavior
