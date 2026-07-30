@@ -73,7 +73,8 @@ class MultiLayerPooling(BasePooling):
             counts = mask.sum(dim=1).clamp(min=1)
             pooled.append(summed / counts)
         concat = torch.cat(pooled, dim=-1)  # (batch, hidden_dim * num_layers)
-        return self.norm(concat)             # (batch, hidden_dim)
+        concat = concat.to(torch.float32)    # cast to float32 for LayerNorm
+        return self.norm(concat)
 
 
 def build_pooling(strategy: str, hidden_dim: int, **kwargs) -> BasePooling:
