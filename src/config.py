@@ -40,6 +40,8 @@ class TrainingConfig:
     head_type: str = "coral"                           # "coral" | "regression" | "coral_mix"
     dev_ratio: float = 0.2                              # calibration split for dev set
     calibration_method: str = "linear"                  # "none" | "linear" | "isotonic"
+    oversample_min_count: int = 100                     # min samples per score point (0=off)
+    oversample_perturb_prob: float = 0.5                # probability to perturb duplicated text
 
 
 def load_config(yaml_path: str) -> TrainingConfig:

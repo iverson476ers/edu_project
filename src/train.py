@@ -11,7 +11,7 @@ from transformers import (
 from peft import LoraConfig, get_peft_model, TaskType
 
 from src.config import TrainingConfig
-from src.data_pipeline import load_and_split_data, ASAGDataset
+from src.data_pipeline import load_and_split_data, ASAGDataset, oversample_rare_scores
 from src.calibration import fit_calibration, apply_calibration, snap_to_score_points
 from src.evaluate import compute_metrics
 from src.model import OrdinalScorer, coral_loss, coral_mix_loss, prediction_to_score, regression_loss, regression_to_score
@@ -145,6 +145,16 @@ def train(config: TrainingConfig):
     train_df, dev_df, test_df, score_points, q_config = load_and_split_data(config)
     num_classes = len(score_points)
     full_score = float(q_config["full_score"])
+
+    # Oversample rare score points with perturbation (train only)
+    if config.oversample_min_count > 0:
+        train_df = oversample_rare_scores(
+            train_df,
+            min_count=config.oversample_min_count,
+            perturb_prob=config.oversample_perturb_prob,
+            seed=config.seed,
+        )
+        print(f"Train after oversampling: {len(train_df)}")
 
     # Compute pos_weight for CORAL loss (balance imbalanced thresholds)
     pos_weight = torch.ones(num_classes - 1)

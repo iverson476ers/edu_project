@@ -3,6 +3,7 @@ from __future__ import annotations
 import glob
 import json
 
+import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset
@@ -52,6 +53,52 @@ def split_data(
         df, test_size=test_size, random_state=seed, stratify=None
     )
     return train_df.reset_index(drop=True), test_df.reset_index(drop=True)
+
+
+def perturb_text(
+    text: str, rng: np.random.Generator, perturb_prob: float = 0.5
+) -> str:
+    """Apply mild perturbation to a duplicated answer text.
+
+    With probability perturb_prob, applies either or both:
+    (1) insert 3-5 spaces at a random position
+    (2) append a full stop at the end
+    """
+    if rng.random() > perturb_prob:
+        return text
+    if rng.random() < 0.5:
+        n_spaces = int(rng.integers(3, 6))
+        pos = int(rng.integers(0, len(text) + 1))
+        text = text[:pos] + " " * n_spaces + text[pos:]
+    if rng.random() < 0.5:
+        text = text + "\u3002"
+    return text
+
+
+def oversample_rare_scores(
+    df: pd.DataFrame,
+    min_count: int = 100,
+    perturb_prob: float = 0.5,
+    seed: int = 42,
+) -> pd.DataFrame:
+    """Oversample score points below min_count with text perturbation.
+
+    Original samples are kept untouched; only duplicated copies are
+    perturbed to reduce exact-duplicate memorization.
+    """
+    rng = np.random.default_rng(seed)
+    parts = []
+    for _, group in df.groupby("label"):
+        if len(group) < min_count:
+            n_dup = min_count - len(group)
+            dup = group.sample(n=n_dup, replace=True, random_state=seed)
+            dup = dup.copy()
+            dup["text"] = dup["text"].apply(
+                lambda t: perturb_text(t, rng, perturb_prob)
+            )
+            parts.append(dup)
+        parts.append(group)
+    return pd.concat(parts, ignore_index=True)
 
 
 class ASAGDataset(Dataset):
