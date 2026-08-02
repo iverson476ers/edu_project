@@ -113,9 +113,10 @@ def load_validation_data(data_dir: str, subject_id: str, question_id: str) -> pd
 def load_and_split_data(
     config: "TrainingConfig",
 ) -> tuple:
-    """Load data and return (train_df, test_df, score_points, question_config).
+    """Load data and return (train_df, dev_df, test_df, score_points, question_config).
 
-    train_df = all calibration data (merged with answers).
+    train_df = (1 - dev_ratio) of calibration data (merged with answers).
+    dev_df   = dev_ratio of calibration data for model selection & calibration.
     test_df  = external validation set loaded from CSV file.
     """
     from src.config import TrainingConfig
@@ -125,17 +126,29 @@ def load_and_split_data(
 
     answer_df = load_answer_data(answer_path)
     calib_df = load_calibration_data(config.data_dir, config.question_id)
-    train_df = merge_data(answer_df, calib_df)
+    full_calib = merge_data(answer_df, calib_df)
+    score_points = get_score_points(full_calib)
+
+    # Split calibration into train / dev (stratified by score)
+    if config.dev_ratio > 0:
+        train_df, dev_df = train_test_split(
+            full_calib, test_size=config.dev_ratio, random_state=config.seed,
+            stratify=full_calib["label_idx"]
+        )
+        train_df = train_df.reset_index(drop=True)
+        dev_df = dev_df.reset_index(drop=True)
+    else:
+        train_df = full_calib.reset_index(drop=True)
+        dev_df = None
 
     # Load external validation set
     val_df = load_validation_data(config.data_dir, config.subject_id, config.question_id)
     test_df = merge_data(answer_df, val_df)
 
-    score_points = get_score_points(train_df)
-
     print(f"Question: {q_config.get('subject_name', '')} {q_config.get('question_type', '')}")
     print(f"  full_score={q_config['full_score']}, precision={q_config['score_precision']}")
-    print(f"Train (calibration): {len(train_df)}, Test (validation): {len(test_df)}")
+    print(f"Train (calibration): {len(train_df)}, Dev: {len(dev_df) if dev_df is not None else 0}, "
+          f"Test (validation): {len(test_df)}")
     print(f"Score points ({len(score_points)}): {score_points[:5]}...{score_points[-3:]}")
 
-    return train_df, test_df, score_points, q_config
+    return train_df, dev_df, test_df, score_points, q_config

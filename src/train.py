@@ -12,6 +12,7 @@ from peft import LoraConfig, get_peft_model, TaskType
 
 from src.config import TrainingConfig
 from src.data_pipeline import load_and_split_data, ASAGDataset
+from src.calibration import fit_calibration, apply_calibration, snap_to_score_points
 from src.evaluate import compute_metrics
 from src.model import OrdinalScorer, coral_loss, coral_mix_loss, prediction_to_score, regression_loss, regression_to_score
 
@@ -77,7 +78,7 @@ def get_dataloader(df, tokenizer, config, shuffle=True):
     return DataLoader(ds, batch_size=config.batch_size, shuffle=shuffle)
 
 
-def validate(model, dataloader, score_points, device, full_score, tolerance=0.0, beta=1.0, lambda_reg=0.4, pos_weight=None):
+def validate(model, dataloader, score_points, device, full_score, tolerance=0.0, beta=1.0, lambda_reg=0.4, pos_weight=None, return_predictions=False):
     model.eval()
     all_preds = []
     all_labels = []
@@ -131,6 +132,8 @@ def validate(model, dataloader, score_points, device, full_score, tolerance=0.0,
         print(f"  score {score:>5.1f} (n={len(vals):>4}): MAE={mae:.3f}")
     metrics["per_score_mae"] = per_score_mae
 
+    if return_predictions:
+        return metrics, all_preds, all_labels
     return metrics
 
 
@@ -139,7 +142,7 @@ def train(config: TrainingConfig):
     torch.manual_seed(config.seed)
 
     # 1. Load data
-    train_df, test_df, score_points, q_config = load_and_split_data(config)
+    train_df, dev_df, test_df, score_points, q_config = load_and_split_data(config)
     num_classes = len(score_points)
     full_score = float(q_config["full_score"])
 
@@ -160,6 +163,7 @@ def train(config: TrainingConfig):
 
     # 3. Build dataloaders
     train_loader = get_dataloader(train_df, tokenizer, config, shuffle=True)
+    dev_loader = get_dataloader(dev_df, tokenizer, config, shuffle=False) if dev_df is not None else None
     test_loader = get_dataloader(test_df, tokenizer, config, shuffle=False)
 
     # 4. Optimizer & scheduler (split LR: head > backbone)
@@ -224,7 +228,7 @@ def train(config: TrainingConfig):
                 print(f"Step {global_step}: loss={loss.item():.4f}, lr={scheduler.get_last_lr()[0]:.2e}")
 
             if global_step % config.eval_steps == 0:
-                metrics = validate(model, test_loader, score_points, device, full_score, config.tolerance, config.beta, config.lambda_reg, pos_weight=pos_weight)
+                metrics = validate(model, dev_loader or test_loader, score_points, device, full_score, config.tolerance, config.beta, config.lambda_reg, pos_weight=pos_weight)
                 print(f"Eval @ step {global_step}: {metrics}")
                 if metrics["acc"] > best_acc:
                     best_acc = metrics["acc"]
@@ -236,8 +240,7 @@ def train(config: TrainingConfig):
                 model.train()
 
         # End of epoch eval
-        #metrics = validate(model, test_loader, score_points, device)
-        metrics = validate(model, test_loader, score_points, device, full_score, config.tolerance, config.beta, config.lambda_reg, pos_weight=pos_weight)
+        metrics = validate(model, dev_loader or test_loader, score_points, device, full_score, config.tolerance, config.beta, config.lambda_reg, pos_weight=pos_weight)
         print(f"Epoch {epoch+1}/{config.epochs}: {metrics}")
         if metrics["acc"] > best_acc:
             best_acc = metrics["acc"]
@@ -252,17 +255,58 @@ def train(config: TrainingConfig):
 
     print(f"Training complete. Best accuracy: {best_acc:.4f}")
 
-    # Save final model checkpoint (always)
+    # Load best checkpoint (best on dev) for calibration
+    best_path = os.path.join(config.output_dir, "best_model.pt")
+    if os.path.exists(best_path):
+        ckpt = torch.load(best_path, map_location=device, weights_only=False)
+        model.load_state_dict(ckpt["model_state_dict"], strict=False)
+        print("Loaded best model for calibration")
+
+    # Fit calibration on dev predictions, then apply to test
+    calibration = None
+    if dev_loader is not None:
+        _, dev_preds, dev_labels = validate(
+            model, dev_loader, score_points, device, full_score,
+            config.tolerance, config.beta, config.lambda_reg, pos_weight=pos_weight,
+            return_predictions=True
+        )
+        calibration = fit_calibration(
+            dev_preds, dev_labels, method=config.calibration_method
+        )
+        print(f"Calibration fitted: {calibration.get('method', 'none') if calibration else 'none'}")
+
+    _, test_preds_raw, test_labels = validate(
+        model, test_loader, score_points, device, full_score,
+        config.tolerance, config.beta, config.lambda_reg, pos_weight=pos_weight,
+        return_predictions=True
+    )
+    test_preds_cal = apply_calibration(test_preds_raw, calibration)
+    test_preds_snapped = snap_to_score_points(test_preds_cal, score_points)
+    final_metrics = compute_metrics(
+        test_preds_snapped, test_labels,
+        tolerance=config.tolerance if config.tolerance > 0 else None
+    )
+    final_metrics["best_accuracy"] = best_acc
+    final_metrics["calibration_method"] = config.calibration_method
+
+    # Save calibrated best + final model checkpoints
+    save_dict = {
+        "model_state_dict": model.state_dict(),
+        "config": config,
+        "score_points": score_points,
+        "full_score": full_score,
+        "calibration": calibration,
+    }
     torch.save(
-        {"model_state_dict": model.state_dict(), "config": config, "score_points": score_points, "full_score": full_score},
+        save_dict,
+        os.path.join(config.output_dir, "best_model.pt"),
+    )
+    torch.save(
+        save_dict,
         os.path.join(config.output_dir, "final_model.pt"),
     )
     print(f"Final model saved to {os.path.join(config.output_dir, 'final_model.pt')}")
 
-    # Run final validation and save metrics
-    final_metrics = validate(model, test_loader, score_points, device, full_score, config.tolerance, config.beta, config.lambda_reg, pos_weight=pos_weight)
-    #final_metrics = validate(model, test_loader, score_points, device)
-    final_metrics["best_accuracy"] = best_acc
     with open(os.path.join(config.output_dir, "metrics.json"), "w") as f:
         json.dump(final_metrics, f, indent=2)
     print(f"Final metrics: {final_metrics}")

@@ -3,6 +3,7 @@ from __future__ import annotations
 import torch
 from transformers import AutoTokenizer
 
+from src.calibration import apply_calibration, snap_to_score_points
 from src.model import OrdinalScorer, prediction_to_score, regression_to_score
 
 
@@ -16,6 +17,7 @@ def load_scorer(checkpoint_path: str, device: str = "cuda"):
     score_points = ckpt["score_points"]
     full_score = ckpt.get("full_score", float(score_points[-1]))
     head_type = getattr(config, "head_type", "coral")
+    calibration = ckpt.get("calibration")
 
     tokenizer = AutoTokenizer.from_pretrained(
         config.model_name, trust_remote_code=True
@@ -68,7 +70,7 @@ def load_scorer(checkpoint_path: str, device: str = "cuda"):
     model.to(device)
     model.eval()
 
-    return model, tokenizer, score_points, config.max_length, full_score, head_type
+    return model, tokenizer, score_points, config.max_length, full_score, head_type, calibration
 
 
 def predict(
@@ -79,6 +81,7 @@ def predict(
     device: str = "cuda",
     max_length: int = 2048,
     full_score: float | None = None,
+    calibration: dict | None = None,
 ) -> float | tuple[float, float]:
     """Predict score for a single text.
 
@@ -97,12 +100,15 @@ def predict(
             probs = torch.sigmoid(ordinal_logits)
             coral_score = prediction_to_score(probs.cpu(), score_points)[0]
             reg_score = round(regression_to_score(reg_value.cpu(), full_score)[0] / 0.5) * 0.5
+            coral_score = snap_to_score_points(apply_calibration([coral_score], calibration), score_points)[0]
+            reg_score = snap_to_score_points(apply_calibration([reg_score], calibration), score_points)[0]
             return coral_score, reg_score
         elif head_type == "regression":
             scores = regression_to_score(output.cpu(), full_score)
         else:
             probs = torch.sigmoid(output)
             scores = prediction_to_score(probs.cpu(), score_points)
+    scores = snap_to_score_points(apply_calibration(scores, calibration), score_points)
     return scores[0]
 
 
@@ -114,6 +120,7 @@ def predict_batch(
     device: str = "cuda",
     max_length: int = 2048,
     full_score: float | None = None,
+    calibration: dict | None = None,
 ) -> list[float] | tuple[list[float], list[float]]:
     """Predict scores for a batch of texts in one forward pass.
 
@@ -136,12 +143,15 @@ def predict_batch(
             probs = torch.sigmoid(ordinal_logits).cpu()
             coral_scores = prediction_to_score(probs, score_points)
             reg_scores = [round(s / 0.5) * 0.5 for s in regression_to_score(reg_value.cpu(), full_score)]
+            coral_scores = snap_to_score_points(apply_calibration(coral_scores, calibration), score_points)
+            reg_scores = snap_to_score_points(apply_calibration(reg_scores, calibration), score_points)
             return coral_scores, reg_scores
         elif head_type == "regression":
             scores = regression_to_score(output.cpu(), full_score)
         else:
             probs = torch.sigmoid(output).cpu()
             scores = prediction_to_score(probs, score_points)
+    scores = snap_to_score_points(apply_calibration(scores, calibration), score_points)
     return scores
 
 
@@ -170,7 +180,7 @@ if __name__ == "__main__":
 
     # Load model
     print(f"Loading checkpoint: {args.checkpoint}")
-    model, tokenizer, score_points, max_length, full_score, head_type = load_scorer(
+    model, tokenizer, score_points, max_length, full_score, head_type, calibration = load_scorer(
         args.checkpoint, device=args.device
     )
     print(f"Model loaded, head={head_type}, score_points={len(score_points)}, max_length={max_length}")
@@ -205,6 +215,7 @@ if __name__ == "__main__":
                 batch_texts, model, tokenizer, score_points,
                 device=args.device, max_length=max_length,
                 full_score=full_score,
+                calibration=calibration,
             )
             if is_coral_mix:
                 coral_scores, reg_scores = batch_result
@@ -239,4 +250,3 @@ if __name__ == "__main__":
     fail = sum(1 for r in all_results if "失败" in r[2])
     print(f"Done. 成功={success} 跳过={skip} 失败={fail}")
     print(f"Saved to: {args.output}")
-

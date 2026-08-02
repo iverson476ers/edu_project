@@ -38,6 +38,8 @@ class TrainingConfig:
     head_hidden_sizes: list[int] = field(default_factory=list)  # e.g. [512, 128], empty=old behavior
     head_dropout: float = 0.1
     head_type: str = "coral"                           # "coral" | "regression" | "coral_mix"
+    dev_ratio: float = 0.2                              # calibration split for dev set
+    calibration_method: str = "linear"                  # "none" | "linear" | "isotonic"
 
 
 def load_config(yaml_path: str) -> TrainingConfig:
