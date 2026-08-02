@@ -260,7 +260,13 @@ def train(config: TrainingConfig):
     if os.path.exists(best_path):
         ckpt = torch.load(best_path, map_location=device, weights_only=False)
         model.load_state_dict(ckpt["model_state_dict"], strict=False)
+        del ckpt  # release checkpoint GPU copies
         print("Loaded best model for calibration")
+
+    # Release training memory before calibration inference
+    optimizer.zero_grad(set_to_none=True)
+    optimizer.state.clear()
+    torch.cuda.empty_cache()
 
     # Fit calibration on dev predictions, then apply to test
     calibration = None
