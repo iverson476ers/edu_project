@@ -12,7 +12,6 @@ from peft import LoraConfig, get_peft_model, TaskType
 
 from src.config import TrainingConfig
 from src.data_pipeline import load_and_split_data, ASAGDataset, oversample_rare_scores
-from src.calibration import fit_calibration, apply_calibration, snap_to_score_points
 from src.evaluate import compute_metrics
 from src.model import OrdinalScorer, coral_loss, coral_mix_loss, prediction_to_score, regression_loss, regression_to_score
 
@@ -78,7 +77,7 @@ def get_dataloader(df, tokenizer, config, shuffle=True):
     return DataLoader(ds, batch_size=config.batch_size, shuffle=shuffle)
 
 
-def validate(model, dataloader, score_points, device, full_score, tolerance=0.0, beta=1.0, lambda_reg=0.4, pos_weight=None, return_predictions=False):
+def validate(model, dataloader, score_points, device, full_score, tolerance=0.0, beta=1.0, lambda_reg=0.4, return_predictions=False):
     model.eval()
     all_preds = []
     all_labels = []
@@ -99,7 +98,7 @@ def validate(model, dataloader, score_points, device, full_score, tolerance=0.0,
                 ordinal_logits, reg_value = output
                 loss = coral_mix_loss(ordinal_logits, reg_value, label_indices,
                                       labels_batch, model.num_classes, full_score,
-                                      lambda_reg, pos_weight=pos_weight)
+                                      lambda_reg)
                 probs = torch.sigmoid(ordinal_logits)
                 preds = prediction_to_score(probs.cpu(), score_points)
             elif is_regression:
@@ -108,7 +107,7 @@ def validate(model, dataloader, score_points, device, full_score, tolerance=0.0,
                 # Snap to 0.5 grid
                 preds = [round(p / 0.5) * 0.5 for p in preds]
             else:
-                loss = coral_loss(output, label_indices, model.num_classes, pos_weight=pos_weight)
+                loss = coral_loss(output, label_indices, model.num_classes)
                 probs = torch.sigmoid(output)
                 preds = prediction_to_score(probs.cpu(), score_points)
 
@@ -155,17 +154,6 @@ def train(config: TrainingConfig):
             seed=config.seed,
         )
         print(f"Train after oversampling: {len(train_df)}")
-
-    # Compute pos_weight for CORAL loss (balance imbalanced thresholds)
-    pos_weight = torch.ones(num_classes - 1)
-    all_idx = train_df["label_idx"].values
-    for k in range(num_classes - 1):
-        pos = int((all_idx > k).sum())
-        neg = len(all_idx) - pos
-        if 0 < pos < neg:
-            pos_weight[k] = min(neg / pos, 10.0)
-    pos_weight = pos_weight.to(device)
-    print(f"pos_weight: [{', '.join(f'{w:.1f}' for w in pos_weight.cpu())}]")
 
     # 2. Setup model
     model, tokenizer = setup_model_and_tokenizer(config, num_classes)
@@ -219,11 +207,11 @@ def train(config: TrainingConfig):
                 ordinal_logits, reg_value = output
                 loss = coral_mix_loss(ordinal_logits, reg_value, label_indices,
                                       batch["label"].to(device), num_classes,
-                                      full_score, config.lambda_reg, pos_weight=pos_weight)
+                                      full_score, config.lambda_reg)
             elif head_type == "regression":
                 loss = regression_loss(output, batch["label"].to(device), full_score, config.beta)
             else:
-                loss = coral_loss(output, label_indices, num_classes, pos_weight=pos_weight)
+                loss = coral_loss(output, label_indices, num_classes)
 
             optimizer.zero_grad()
             loss.backward()
@@ -238,7 +226,7 @@ def train(config: TrainingConfig):
                 print(f"Step {global_step}: loss={loss.item():.4f}, lr={scheduler.get_last_lr()[0]:.2e}")
 
             if global_step % config.eval_steps == 0:
-                metrics = validate(model, dev_loader or test_loader, score_points, device, full_score, config.tolerance, config.beta, config.lambda_reg, pos_weight=pos_weight)
+                metrics = validate(model, dev_loader or test_loader, score_points, device, full_score, config.tolerance, config.beta, config.lambda_reg)
                 print(f"Eval @ step {global_step}: {metrics}")
                 if metrics["acc"] > best_acc:
                     best_acc = metrics["acc"]
@@ -250,7 +238,7 @@ def train(config: TrainingConfig):
                 model.train()
 
         # End of epoch eval
-        metrics = validate(model, dev_loader or test_loader, score_points, device, full_score, config.tolerance, config.beta, config.lambda_reg, pos_weight=pos_weight)
+        metrics = validate(model, dev_loader or test_loader, score_points, device, full_score, config.tolerance, config.beta, config.lambda_reg)
         print(f"Epoch {epoch+1}/{config.epochs}: {metrics}")
         if metrics["acc"] > best_acc:
             best_acc = metrics["acc"]
@@ -265,64 +253,16 @@ def train(config: TrainingConfig):
 
     print(f"Training complete. Best accuracy: {best_acc:.4f}")
 
-    # Load best checkpoint (best on dev) for calibration
-    best_path = os.path.join(config.output_dir, "best_model.pt")
-    if os.path.exists(best_path):
-        ckpt = torch.load(best_path, map_location=device, weights_only=False)
-        model.load_state_dict(ckpt["model_state_dict"], strict=False)
-        del ckpt  # release checkpoint GPU copies
-        print("Loaded best model for calibration")
-
-    # Release training memory before calibration inference
-    optimizer.zero_grad(set_to_none=True)
-    optimizer.state.clear()
-    torch.cuda.empty_cache()
-
-    # Fit calibration on dev predictions, then apply to test
-    calibration = None
-    if dev_loader is not None:
-        _, dev_preds, dev_labels = validate(
-            model, dev_loader, score_points, device, full_score,
-            config.tolerance, config.beta, config.lambda_reg, pos_weight=pos_weight,
-            return_predictions=True
-        )
-        calibration = fit_calibration(
-            dev_preds, dev_labels, method=config.calibration_method
-        )
-        print(f"Calibration fitted: {calibration.get('method', 'none') if calibration else 'none'}")
-
-    _, test_preds_raw, test_labels = validate(
-        model, test_loader, score_points, device, full_score,
-        config.tolerance, config.beta, config.lambda_reg, pos_weight=pos_weight,
-        return_predictions=True
-    )
-    test_preds_cal = apply_calibration(test_preds_raw, calibration)
-    test_preds_snapped = snap_to_score_points(test_preds_cal, score_points)
-    final_metrics = compute_metrics(
-        test_preds_snapped, test_labels,
-        tolerance=config.tolerance if config.tolerance > 0 else None
-    )
-    final_metrics["best_accuracy"] = best_acc
-    final_metrics["calibration_method"] = config.calibration_method
-
-    # Save calibrated best + final model checkpoints
-    save_dict = {
-        "model_state_dict": model.state_dict(),
-        "config": config,
-        "score_points": score_points,
-        "full_score": full_score,
-        "calibration": calibration,
-    }
+    # Save final model checkpoint (always)
     torch.save(
-        save_dict,
-        os.path.join(config.output_dir, "best_model.pt"),
-    )
-    torch.save(
-        save_dict,
+        {"model_state_dict": model.state_dict(), "config": config, "score_points": score_points, "full_score": full_score},
         os.path.join(config.output_dir, "final_model.pt"),
     )
     print(f"Final model saved to {os.path.join(config.output_dir, 'final_model.pt')}")
 
+    # Run final validation on test set
+    final_metrics = validate(model, test_loader, score_points, device, full_score, config.tolerance, config.beta, config.lambda_reg)
+    final_metrics["best_accuracy"] = best_acc
     with open(os.path.join(config.output_dir, "metrics.json"), "w") as f:
         json.dump(final_metrics, f, indent=2)
     print(f"Final metrics: {final_metrics}")
